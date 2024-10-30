@@ -462,10 +462,405 @@ static PyObject *method_qpSWIFT(PyObject *self, PyObject *args, PyObject *kwargs
     return result;
 }
 
+static PyObject *method_qp_SWIFT_sparse(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+    PyArrayObject *c, *h, *b = NULL;
+    PyObject *P, *G, *A = NULL;
+    PyObject *opts = NULL;
+
+    PyObject *P_data_obj, *P_indices_obj, *P_indptr_obj, *P_shape_obj;
+    PyObject *G_data_obj, *G_indices_obj, *G_indptr_obj, *G_shape_obj;
+    PyObject *A_data_obj = NULL, *A_indices_obj = NULL, *A_indptr_obj = NULL, *A_shape_obj = NULL;
+
+    PyArrayObject *P_data_arr, *P_indices_arr, *P_indptr_arr;
+    PyArrayObject *G_data_arr, *G_indices_arr, *G_indptr_arr;
+    PyArrayObject *A_data_arr = NULL, *A_indices_arr = NULL, *A_indptr_arr = NULL;
+
+    qp_real *cpr, *hpr, *bpr = NULL;
+    qp_real *Ppr, *Gpr, *Apr = NULL;
+    qp_int *Pjc, *Pir;
+    qp_int *Gjc, *Gir;
+    qp_int *Ajc = NULL, *Air = NULL;
+
+    PyObject *basic_info = NULL, *adv_info = NULL, *result;
+
+    /* Results Pointer */
+    PyArrayObject *sol_x, *sol_y = NULL, *sol_z = NULL, *sol_s = NULL;
+    /* Results Dimensions */
+    npy_intp sol_xdim[1], sol_ydim[1], sol_zdim[1], sol_sdim[1];
+    /* Options */
+    PyObject *opts_maxiter = NULL, *opts_abstol = NULL, *opts_reltol = NULL, *opts_sigma = NULL, *opts_verbose = NULL, *opts_output = NULL;
+    qp_int opts_output_level = 10;
+    /* Temporary variables */
+    qp_int n, m, p = 0;
+    qp_int P_nrows, P_ncols;
+    qp_int G_nrows, G_ncols;
+    qp_int A_nrows = 0, A_ncols = 0;
+
+    static char *kwlist[] = {"c", "h", "P", "G", "A", "b", "opts", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O!O!OO|OOO", kwlist,
+                                     &PyArray_Type, &c,
+                                     &PyArray_Type, &h,
+                                     &P,
+                                     &G,
+                                     &A,
+                                     &b,
+                                     &opts))
+    {
+        return NULL;
+    }
+
+    /* Check c */
+    if (!PyArray_ISFLOAT(c) || (PyArray_NDIM(c) != 1))
+    {
+        PyErr_SetString(PyExc_TypeError, "c must be a floating array with one dimension");
+        return NULL;
+    }
+    n = (qp_int)PyArray_DIM(c, 0);
+
+    /* Check h */
+    if (!PyArray_ISFLOAT(h) || (PyArray_NDIM(h) != 1))
+    {
+        PyErr_SetString(PyExc_TypeError, "h must be a floating array with one dimension");
+        return NULL;
+    }
+    m = (qp_int)PyArray_DIM(h, 0);
+
+    /* Check b and A */
+    if (b && A)
+    {
+        if (!PyArray_ISFLOAT(b) || (PyArray_NDIM(b) != 1))
+        {
+            PyErr_SetString(PyExc_TypeError, "b must be a floating array with one dimension");
+            return NULL;
+        }
+        p = (qp_int)PyArray_DIM(b, 0);
+    }
+
+    /* Extract data from P */
+    P_data_obj = PyObject_GetAttrString(P, "data");
+    P_indices_obj = PyObject_GetAttrString(P, "indices");
+    P_indptr_obj = PyObject_GetAttrString(P, "indptr");
+    P_shape_obj = PyObject_GetAttrString(P, "shape");
+
+    if (!P_data_obj || !P_indices_obj || !P_indptr_obj || !P_shape_obj)
+    {
+        PyErr_SetString(PyExc_TypeError, "P must be a scipy.sparse.csc_matrix with data, indices, indptr, shape attributes");
+        return NULL;
+    }
+
+    /* Convert to numpy arrays */
+    P_data_arr = (PyArrayObject *)PyArray_FROMANY(P_data_obj, NPY_DOUBLE, 1, 1, NPY_ARRAY_IN_ARRAY);
+    P_indices_arr = (PyArrayObject *)PyArray_FROMANY(P_indices_obj, NPY_INT64, 1, 1, NPY_ARRAY_IN_ARRAY);
+    P_indptr_arr = (PyArrayObject *)PyArray_FROMANY(P_indptr_obj, NPY_INT64, 1, 1, NPY_ARRAY_IN_ARRAY);
+
+    /* Get P shape */
+    if (PyTuple_Check(P_shape_obj)) {
+        P_nrows = (qp_int)PyLong_AsLong(PyTuple_GetItem(P_shape_obj, 0));
+        P_ncols = (qp_int)PyLong_AsLong(PyTuple_GetItem(P_shape_obj, 1));
+    } else {
+        PyErr_SetString(PyExc_TypeError, "P.shape is not a tuple");
+        return NULL;
+    }
+    if (P_nrows != n || P_ncols != n)
+    {
+        PyErr_SetString(PyExc_TypeError, "P must be of shape (n, n)");
+        return NULL;
+    }
+
+    /* Similarly extract data from G */
+    G_data_obj = PyObject_GetAttrString(G, "data");
+    G_indices_obj = PyObject_GetAttrString(G, "indices");
+    G_indptr_obj = PyObject_GetAttrString(G, "indptr");
+    G_shape_obj = PyObject_GetAttrString(G, "shape");
+
+    if (!G_data_obj || !G_indices_obj || !G_indptr_obj || !G_shape_obj)
+    {
+        PyErr_SetString(PyExc_TypeError, "G must be a scipy.sparse.csc_matrix with data, indices, indptr, shape attributes");
+        return NULL;
+    }
+
+    G_data_arr = (PyArrayObject *)PyArray_FROMANY(G_data_obj, NPY_DOUBLE, 1, 1, NPY_ARRAY_IN_ARRAY);
+    G_indices_arr = (PyArrayObject *)PyArray_FROMANY(G_indices_obj, NPY_INT64, 1, 1, NPY_ARRAY_IN_ARRAY);
+    G_indptr_arr = (PyArrayObject *)PyArray_FROMANY(G_indptr_obj, NPY_INT64, 1, 1, NPY_ARRAY_IN_ARRAY);
+
+    if (PyTuple_Check(G_shape_obj)) {
+        G_nrows = (qp_int)PyLong_AsLong(PyTuple_GetItem(G_shape_obj, 0));
+        G_ncols = (qp_int)PyLong_AsLong(PyTuple_GetItem(G_shape_obj, 1));
+    } else {
+        PyErr_SetString(PyExc_TypeError, "G.shape is not a tuple");
+        return NULL;
+    }
+    if (G_nrows != m || G_ncols != n)
+    {
+        PyErr_SetString(PyExc_TypeError, "G must have compatible dimensions with h and c");
+        return NULL;
+    }
+
+    /* Extract data from A if provided */
+    if (A && b)
+    {
+        A_data_obj = PyObject_GetAttrString(A, "data");
+        A_indices_obj = PyObject_GetAttrString(A, "indices");
+        A_indptr_obj = PyObject_GetAttrString(A, "indptr");
+        A_shape_obj = PyObject_GetAttrString(A, "shape");
+
+        if (!A_data_obj || !A_indices_obj || !A_indptr_obj || !A_shape_obj)
+        {
+            PyErr_SetString(PyExc_TypeError, "A must be a scipy.sparse.csc_matrix with data, indices, indptr, shape attributes");
+            return NULL;
+        }
+
+        A_data_arr = (PyArrayObject *)PyArray_FROMANY(A_data_obj, NPY_DOUBLE, 1, 1, NPY_ARRAY_IN_ARRAY);
+        A_indices_arr = (PyArrayObject *)PyArray_FROMANY(A_indices_obj, NPY_INT64, 1, 1, NPY_ARRAY_IN_ARRAY);
+        A_indptr_arr = (PyArrayObject *)PyArray_FROMANY(A_indptr_obj, NPY_INT64, 1, 1, NPY_ARRAY_IN_ARRAY);
+
+        if (PyTuple_Check(A_shape_obj)) {
+            A_nrows = (qp_int)PyLong_AsLong(PyTuple_GetItem(A_shape_obj, 0));
+            A_ncols = (qp_int)PyLong_AsLong(PyTuple_GetItem(A_shape_obj, 1));
+        } else {
+            PyErr_SetString(PyExc_TypeError, "A.shape is not a tuple");
+            return NULL;
+        }
+        if (A_nrows != p || A_ncols != n)
+        {
+            PyErr_SetString(PyExc_TypeError, "A must have compatible dimensions with b and c");
+            return NULL;
+        }
+    }
+
+    /* Get pointers to data */
+    cpr = (qp_real *)PyArray_DATA(c);
+    hpr = (qp_real *)PyArray_DATA(h);
+    if (b)
+        bpr = (qp_real *)PyArray_DATA(b);
+
+    Ppr = (qp_real *)PyArray_DATA(P_data_arr);
+    Pir = (qp_int *)PyArray_DATA(P_indices_arr);
+    Pjc = (qp_int *)PyArray_DATA(P_indptr_arr);
+
+    Gpr = (qp_real *)PyArray_DATA(G_data_arr);
+    Gir = (qp_int *)PyArray_DATA(G_indices_arr);
+    Gjc = (qp_int *)PyArray_DATA(G_indptr_arr);
+
+    if (A && b)
+    {
+        Apr = (qp_real *)PyArray_DATA(A_data_arr);
+        Air = (qp_int *)PyArray_DATA(A_indices_arr);
+        Ajc = (qp_int *)PyArray_DATA(A_indptr_arr);
+    }
+
+    /* Set up options */
+    settings inopts;
+    inopts.abstol = ABSTOL;
+    inopts.reltol = RELTOL;
+    inopts.maxit = MAXIT;
+    inopts.sigma = SIGMA;
+    inopts.verbose = VERBOSE;
+
+    if (opts && PyDict_Check(opts))
+    {
+        opts_maxiter = PyDict_GetItemString(opts, "MAXITER");
+        if (opts_maxiter)
+        {
+            Py_INCREF(opts_maxiter);
+            if (qpLong_check(opts_maxiter))
+            {
+                inopts.maxit = (qp_int)qp_getlong(opts_maxiter);
+            }
+            Py_DECREF(opts_maxiter);
+        }
+
+        opts_abstol = PyDict_GetItemString(opts, "ABSTOL");
+        if (opts_abstol)
+        {
+            Py_INCREF(opts_abstol);
+            if (PyFloat_Check(opts_abstol))
+            {
+                inopts.abstol = (qp_real)PyFloat_AsDouble(opts_abstol);
+            }
+            Py_DECREF(opts_abstol);
+        }
+
+        opts_reltol = PyDict_GetItemString(opts, "RELTOL");
+        if (opts_reltol)
+        {
+            Py_INCREF(opts_reltol);
+            if (PyFloat_Check(opts_reltol))
+            {
+                inopts.reltol = (qp_real)PyFloat_AsDouble(opts_reltol);
+            }
+            Py_DECREF(opts_reltol);
+        }
+
+        opts_sigma = PyDict_GetItemString(opts, "SIGMA");
+        if (opts_sigma)
+        {
+            Py_INCREF(opts_sigma);
+            if (PyFloat_Check(opts_sigma))
+            {
+                inopts.sigma = (qp_real)PyFloat_AsDouble(opts_sigma);
+            }
+            Py_DECREF(opts_sigma);
+        }
+
+        opts_verbose = PyDict_GetItemString(opts, "VERBOSE");
+        if (opts_verbose)
+        {
+            Py_INCREF(opts_verbose);
+            if (qpLong_check(opts_verbose))
+            {
+                inopts.verbose = (qp_int)qp_getlong(opts_verbose);
+            }
+            Py_DECREF(opts_verbose);
+        }
+
+        opts_output = PyDict_GetItemString(opts, "OUTPUT");
+        if (opts_output)
+        {
+            Py_INCREF(opts_output);
+            if (qpLong_check(opts_output))
+            {
+                opts_output_level = (qp_int)qp_getlong(opts_output);
+            }
+            Py_DECREF(opts_output);
+        }
+    }
+
+    /* Call QP_SETUP */
+    QP *myQP;
+    myQP = QP_SETUP(n, m, p, Pjc, Pir, Ppr, Ajc, Air, Apr, Gjc, Gir, Gpr, cpr, hpr, bpr, 0.0, NULL);
+
+    /* Copy settings */
+    myQP->options->abstol = inopts.abstol;
+    myQP->options->reltol = inopts.reltol;
+    myQP->options->maxit = inopts.maxit;
+    myQP->options->sigma = inopts.sigma;
+    myQP->options->verbose = inopts.verbose;
+
+    /* Solve the QP */
+    qp_int ExitCode;
+    Py_BEGIN_ALLOW_THREADS;
+    ExitCode = QP_SOLVE(myQP);
+    Py_END_ALLOW_THREADS;
+
+    /* Prepare results */
+    sol_xdim[0] = myQP->n;
+    sol_x = (PyArrayObject *)PyArray_SimpleNew(1, sol_xdim, NPY_DOUBLE);
+    memcpy(PyArray_DATA(sol_x), myQP->x, myQP->n * sizeof(qp_real));
+
+    /* Prepare output dictionary based on opts_output_level */
+    switch (opts_output_level)
+    {
+    case 1:
+        basic_info = Py_BuildValue("{s:l,s:l,s:d,s:d}",
+                                   "ExitFlag", ExitCode,
+                                   "Iterations", myQP->stats->IterationCount,
+                                   "Setup_Time", myQP->stats->tsetup,
+                                   "Solve_Time", myQP->stats->tsolve);
+
+        result = Py_BuildValue("{s:O,s:O}",
+                               "sol", sol_x,
+                               "basicInfo", basic_info);
+
+        Py_DECREF(basic_info);
+        break;
+    case 2:
+        basic_info = Py_BuildValue("{s:l,s:l,s:d,s:d}",
+                                   "ExitFlag", ExitCode,
+                                   "Iterations", myQP->stats->IterationCount,
+                                   "Setup_Time", myQP->stats->tsetup,
+                                   "Solve_Time", myQP->stats->tsolve);
+
+        if (b && A)
+        {
+            sol_ydim[0] = myQP->p;
+            sol_y = (PyArrayObject *)PyArray_SimpleNew(1, sol_ydim, NPY_DOUBLE);
+            memcpy(PyArray_DATA(sol_y), myQP->y, myQP->p * sizeof(qp_real));
+        }
+
+        sol_zdim[0] = myQP->m;
+        sol_z = (PyArrayObject *)PyArray_SimpleNew(1, sol_zdim, NPY_DOUBLE);
+        memcpy(PyArray_DATA(sol_z), myQP->z, myQP->m * sizeof(qp_real));
+
+        sol_sdim[0] = myQP->m;
+        sol_s = (PyArrayObject *)PyArray_SimpleNew(1, sol_sdim, NPY_DOUBLE);
+        memcpy(PyArray_DATA(sol_s), myQP->s, myQP->m * sizeof(qp_real));
+
+        if (b && A)
+        {
+            adv_info = Py_BuildValue("{s:d,s:d,s:d,s:O,s:O,s:O}",
+                                     "fval", myQP->stats->fval,
+                                     "kktTime", myQP->stats->kkt_time,
+                                     "ldlTime", myQP->stats->ldl_numeric,
+                                     "y", sol_y,
+                                     "z", sol_z,
+                                     "s", sol_s);
+        }
+        else
+        {
+            adv_info = Py_BuildValue("{s:d,s:d,s:d,s:O,s:O}",
+                                     "fval", myQP->stats->fval,
+                                     "kktTime", myQP->stats->kkt_time,
+                                     "ldlTime", myQP->stats->ldl_numeric,
+                                     "z", sol_z,
+                                     "s", sol_s);
+        }
+        result = Py_BuildValue("{s:O,s:O,s:O}",
+                               "sol", sol_x,
+                               "basicInfo", basic_info,
+                               "advInfo", adv_info);
+
+        Py_DECREF(basic_info);
+        Py_DECREF(adv_info);
+
+        if (sol_y)
+        {
+            Py_DECREF(sol_y);
+        }
+        Py_DECREF(sol_z);
+        Py_DECREF(sol_s);
+        break;
+    default:
+        result = Py_BuildValue("{s:O}",
+                               "sol", sol_x);
+        break;
+    }
+
+    Py_DECREF(sol_x);
+
+    /* Clean up */
+    Py_DECREF(P_data_arr);
+    Py_DECREF(P_indices_arr);
+    Py_DECREF(P_indptr_arr);
+    Py_DECREF(G_data_arr);
+    Py_DECREF(G_indices_arr);
+    Py_DECREF(G_indptr_arr);
+    if (A_data_arr)
+    {
+        Py_DECREF(A_data_arr);
+        Py_DECREF(A_indices_arr);
+        Py_DECREF(A_indptr_arr);
+    }
+
+    QP_CLEANUP(myQP);
+
+    return result;
+}
+
+
+
+
 static PyMethodDef qpSWIFTMethods[] = {
     {"run", method_qpSWIFT, METH_VARARGS | METH_KEYWORDS, "res = qpSWIFT.run(c,h,P,G,A,b,opts) \n"
-                                                          "Please refer to the Python Documentaion or qpSWIFT_help.py file \n"},
-    {NULL, 0, NULL, NULL}};
+                                                          "Please refer to the Python Documentation or qpSWIFT_help.py file \n"},
+    {"run_sparse", method_qp_SWIFT_sparse, METH_VARARGS | METH_KEYWORDS, "res = qpSWIFT.run_sparse(c, h, P, G, A, b, opts) \n"
+                                                                         "Run the solver with sparse matrix inputs (P, G, A) in CSC format.\n"},
+    {NULL, NULL, 0, NULL}
+};
+
+
 
 #if PY_MAJOR_VERSION >= 3
 static struct PyModuleDef qpSWIFTModule = {
