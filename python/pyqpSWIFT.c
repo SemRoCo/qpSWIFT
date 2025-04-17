@@ -1311,7 +1311,7 @@ static PyMethodDef qpSWIFTMethods[] = {
                                                           "Please refer to the Python Documentation or qpSWIFT_help.py file \n"},
     {"run_sparse", method_qp_SWIFT_sparse, METH_VARARGS | METH_KEYWORDS, "res = qpSWIFT.run_sparse(c, h, P, G, A, b, opts) \n"
                                                                          "Run the solver with sparse matrix inputs (P, G, A) in CSC format.\n"},
-    {"run_sparse_with_box_constraints", method_qp_SWIFT_sparse_with_box, METH_VARARGS | METH_KEYWORDS, "res = qpSWIFT.run_sparse(c, h, h_box, P, G, G_box, A, b, opts) \n"
+    {"run_sparse_with_box_constraints", method_qp_SWIFT_sparse_with_box, METH_VARARGS | METH_KEYWORDS, "res = qpSWIFT.run_sparse(c, h_box, h, P, G_box, G, A, b, opts) \n"
                                                                          "Run the solver with sparse matrix inputs (P, G, G_box, A) in CSC format.\n"},
     {NULL, NULL, 0, NULL}
 };
