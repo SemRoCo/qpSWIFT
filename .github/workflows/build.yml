@@ -1,0 +1,57 @@
+name: Publish Python Package
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      # IMPORTANT: this permission is mandatory for trusted publishing
+      id-token: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ '3.8' ]
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+
+    - name: Install dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        python3 -m pip install setuptools build wheel numpy auditwheel patchelf
+
+    - name: Build package
+      run: |
+        cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        cmake --build build --config Release
+        cd python
+        python3 -m build --wheel -n
+
+    - name: Repair wheel
+      run: |
+        mkdir -p dist
+        cd python
+        auditwheel repair dist/*.whl --plat manylinux_2_34_x86_64
+        rm dist/*.whl
+        mv wheelhouse/*.whl ../dist/
+
+    - name: Publish package
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        repository-url: https://test.pypi.org/legacy/
+        user: __token__
+        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
