@@ -31,10 +31,10 @@ _qpSWIFT = Extension("qpSWIFT",
 
 def main():
     setup(
-    name="qpSWIFT",
+    name="giskard_qpSWIFT",
     version="1.0.0",
     description="Python interface for qpSWIFT",
-    author="Abhishek Pandala",
+    author="",
     setup_requires=["numpy >= 1.6"],
     install_requires=["numpy >= 1.6"],
     ext_modules=[_qpSWIFT]
