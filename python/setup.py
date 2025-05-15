@@ -31,7 +31,7 @@ _qpSWIFT = Extension("qpSWIFT",
 
 def main():
     setup(
-    name="giskard_qpSWIFT",
+    name="giskard_qpswift",
     version="1.0.0",
     description="Python interface for qpSWIFT",
     author="",
