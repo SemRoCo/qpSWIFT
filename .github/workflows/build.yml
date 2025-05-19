@@ -52,6 +52,6 @@ jobs:
     - name: Publish package
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
-        repository-url: https://test.pypi.org/legacy/
-        user: __token__
-        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+#        repository-url: https://test.pypi.org/legacy/  # remove/comment line when publishing to actual repository
+        user: __token__                                # used before setting up a trusted publisher
+        password: ${{ secrets.PYPI_API_TOKEN }}

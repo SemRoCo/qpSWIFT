@@ -36,7 +36,7 @@ def main():
         name="giskard_qpswift",
         version="1.0.0",
         description="Python interface for qpSWIFT",
-        long_description='qpSWIFT is light-weight sparse Quadratic Programming solver targetted for embedded and robotic applications. It employs Primal-Dual Interioir Point method with Mehrotra Predictor corrector step and Nesterov Todd scaling. For solving the linear system of equations, sparse LDL\' factorization is used along with approximate minimum degree heuristic to minimize fill-in of the factorizations. This is a fork of the official qpSWIFT project (https://github.com/qpSWIFT/qpSWIFT)',
+        long_description='qpSWIFT is light-weight sparse Quadratic Programming solver targetted for embedded and robotic applications. It employs Primal-Dual Interioir Point method with Mehrotra Predictor corrector step and Nesterov Todd scaling. For solving the linear system of equations, sparse LDL\' factorization is used along with approximate minimum degree heuristic to minimize fill-in of the factorizations.\n This is a fork of the official qpSWIFT project (https://github.com/qpSWIFT/qpSWIFT) adapted for use with Giskard(py)',
         url='https://github.com/SemRoCo/qpSWIFT',
         author="Simon Stelter",
         setup_requires=["numpy >= 1.6"],
@@ -46,7 +46,7 @@ def main():
         license_files=('LICENSE',),
         classifiers=[
             'Development Status :: 5 - Production/Stable',
-            'License :: OSI Approved :: GNU General Public License v3 (GPLv3)'
+            'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
             'Operating System :: POSIX :: Linux',
             'Intended Audience :: Science/Research',
             "Programming Language :: Python",
