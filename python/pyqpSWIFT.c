@@ -3,6 +3,8 @@
 #include <Python.h>
 #include "numpy/arrayobject.h"
 #include "qpSWIFT.h"
+#include <pthread.h>
+#include <stdio.h>
 
 #if PY_MAJOR_VERSION >= 3
 #define qpLong_check PyLong_Check
@@ -1305,6 +1307,325 @@ static PyObject *method_qp_SWIFT_sparse_with_box(PyObject *self, PyObject *args,
 }
 
 
+/* QP thread data structure */
+typedef struct {
+    PyObject *self;
+    PyObject *args;  /* Now just args without options */
+    PyObject *opts;  /* Shared options for all threads */
+    PyObject *result;
+    int thread_id;
+    int error_occurred;
+    char error_msg[256];
+    int completed;  /* Flag to indicate when the thread completes */
+} qp_thread_data;
+
+/* Thread worker function that solves QP problems */
+void *solve_qp_thread(void *arg) {
+    qp_thread_data *data = (qp_thread_data *)arg;
+
+    /* Acquire the GIL */
+    PyGILState_STATE gstate = PyGILState_Ensure();
+
+    /* Create a new kwargs dict with just the 'opts' key */
+    PyObject *proper_kwargs = PyDict_New();
+    if (proper_kwargs == NULL) {
+        data->error_occurred = 1;
+        snprintf(data->error_msg, sizeof(data->error_msg),
+                 "Failed to create kwargs dict");
+        PyErr_Clear();
+        PyGILState_Release(gstate);
+        data->completed = 1;
+        return NULL;
+    }
+
+    /* Set the 'opts' key to the shared options */
+    if (PyDict_SetItemString(proper_kwargs, "opts", data->opts) < 0) {
+        data->error_occurred = 1;
+        snprintf(data->error_msg, sizeof(data->error_msg),
+                 "Failed to set 'opts' in kwargs dict");
+        Py_DECREF(proper_kwargs);
+        PyErr_Clear();
+        PyGILState_Release(gstate);
+        data->completed = 1;
+        return NULL;
+    }
+
+    /* Call the C function directly */
+    data->result = method_qp_SWIFT_sparse_with_box(data->self, data->args, proper_kwargs);
+
+    /* Clean up */
+    Py_DECREF(proper_kwargs);
+
+    /* Check for errors */
+    if (PyErr_Occurred()) {
+        data->error_occurred = 1;
+        PyObject *ptype, *pvalue, *ptraceback;
+        PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+
+        if (pvalue != NULL) {
+            PyObject *str_obj = PyObject_Str(pvalue);
+            if (str_obj != NULL) {
+                const char *str = PyUnicode_AsUTF8(str_obj);
+                snprintf(data->error_msg, sizeof(data->error_msg), "%s", str);
+                Py_DECREF(str_obj);
+            }
+        }
+
+        Py_XDECREF(ptype);
+        Py_XDECREF(pvalue);
+        Py_XDECREF(ptraceback);
+        data->result = NULL;
+    } else if (data->result == NULL) {
+        data->error_occurred = 1;
+        snprintf(data->error_msg, sizeof(data->error_msg),
+                 "Function returned NULL but no Python error was set");
+    }
+
+    /* Release the GIL */
+    PyGILState_Release(gstate);
+
+    /* Mark as completed */
+    data->completed = 1;
+    return NULL;
+}
+
+/* Simplified batch solver function that accepts shared options */
+static PyObject *method_qp_SWIFT_sparse_with_box_batch(PyObject *self, PyObject *args, PyObject *kwargs) {
+    PyObject *args_list;     /* List of argument tuples */
+    PyObject *opts = NULL;   /* Shared options for all problems */
+    int use_threading = 0;   /* Default to no threading */
+
+    /* Parse keyword arguments */
+    static char *kwlist[] = {"args_list", "opts", "use_threading", NULL};
+
+    /* Parse input with optional parameters */
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O!|Op", kwlist,
+                                    &PyList_Type, &args_list, &opts, &use_threading)) {
+        return NULL;
+    }
+
+    /* If no options provided, use an empty dict */
+    if (opts == NULL) {
+        opts = PyDict_New();
+        if (opts == NULL) {
+            return NULL;
+        }
+    } else if (!PyDict_Check(opts)) {
+        PyErr_SetString(PyExc_TypeError, "opts must be a dictionary");
+        return NULL;
+    } else {
+        /* Increment reference count since we'll use it multiple times */
+        Py_INCREF(opts);
+    }
+
+    /* Get the number of problems */
+    Py_ssize_t num_problems = PyList_Size(args_list);
+    if (num_problems == 0) {
+        /* Empty list - return empty result tuple */
+        Py_DECREF(opts);
+        return PyTuple_New(0);
+    }
+
+    /* For sequential execution (no threading) */
+    if (!use_threading) {
+        PyObject *results = PyTuple_New(num_problems);
+        if (!results) {
+            Py_DECREF(opts);
+            return NULL;
+        }
+
+        for (int i = 0; i < num_problems; i++) {
+            PyObject *args_tuple = PyList_GetItem(args_list, i);
+
+            /* Verify args is a tuple */
+            if (!PyTuple_Check(args_tuple)) {
+                PyErr_SetString(PyExc_TypeError, "Each element in args_list must be a tuple of positional args");
+                Py_DECREF(opts);
+                Py_DECREF(results);
+                return NULL;
+            }
+
+            /* Create kwargs dict with the shared opts */
+            PyObject *proper_kwargs = PyDict_New();
+            if (proper_kwargs == NULL) {
+                Py_DECREF(opts);
+                Py_DECREF(results);
+                return NULL;
+            }
+
+            /* Set the 'opts' key */
+            if (PyDict_SetItemString(proper_kwargs, "opts", opts) < 0) {
+                Py_DECREF(proper_kwargs);
+                Py_DECREF(opts);
+                Py_DECREF(results);
+                return NULL;
+            }
+
+            /* Call the C function directly */
+            PyObject *result = method_qp_SWIFT_sparse_with_box(self, args_tuple, proper_kwargs);
+            Py_DECREF(proper_kwargs);
+
+            if (result == NULL) {
+                Py_DECREF(opts);
+                Py_DECREF(results);
+                return NULL;
+            }
+
+            /* Store result */
+            PyTuple_SET_ITEM(results, i, result);  /* PyTuple_SET_ITEM steals the reference */
+        }
+
+        Py_DECREF(opts);
+        return results;
+    }
+
+    /* For threaded execution */
+    /* Initialize Python threading */
+    PyEval_InitThreads();
+
+    /* Allocate memory */
+    pthread_t *threads = (pthread_t *)malloc(num_problems * sizeof(pthread_t));
+    qp_thread_data *thread_data = (qp_thread_data *)malloc(num_problems * sizeof(qp_thread_data));
+
+    if (!threads || !thread_data) {
+        PyErr_SetString(PyExc_MemoryError, "Failed to allocate memory for threads");
+        Py_DECREF(opts);
+        free(threads);
+        free(thread_data);
+        return NULL;
+    }
+
+    /* Setup thread data */
+    for (int i = 0; i < num_problems; i++) {
+        PyObject *args_tuple = PyList_GetItem(args_list, i);
+
+        /* Verify args is a tuple */
+        if (!PyTuple_Check(args_tuple)) {
+            PyErr_SetString(PyExc_TypeError, "Each element in args_list must be a tuple of positional args");
+            for (int j = 0; j < i; j++) {
+                Py_XDECREF(thread_data[j].args);
+            }
+            Py_DECREF(opts);
+            free(threads);
+            free(thread_data);
+            return NULL;
+        }
+
+        /* Setup thread data */
+        thread_data[i].args = args_tuple;
+        thread_data[i].opts = opts;
+        thread_data[i].self = self;
+        thread_data[i].result = NULL;
+        thread_data[i].thread_id = i;
+        thread_data[i].error_occurred = 0;
+        thread_data[i].completed = 0;
+
+        /* Increment reference for args (opts already incremented once for all threads) */
+        Py_INCREF(thread_data[i].args);
+    }
+
+    /* Release the GIL before creating threads */
+    PyThreadState *_save = PyEval_SaveThread();
+
+    /* Create and start threads */
+    for (int i = 0; i < num_problems; i++) {
+        if (pthread_create(&threads[i], NULL, solve_qp_thread, &thread_data[i]) != 0) {
+            /* Restore the GIL to report error */
+            PyEval_RestoreThread(_save);
+
+            PyErr_SetString(PyExc_RuntimeError, "Failed to create thread");
+            /* Cleanup */
+            for (int j = 0; j < i; j++) {
+                pthread_join(threads[j], NULL);
+                Py_XDECREF(thread_data[j].args);
+            }
+            Py_XDECREF(thread_data[i].args);
+            Py_DECREF(opts);
+            free(threads);
+            free(thread_data);
+            return NULL;
+        }
+    }
+
+    /* Wait for threads - using a faster, non-blocking approach */
+    int all_completed = 0;
+    while (!all_completed) {
+        all_completed = 1;
+
+        /* Check if all threads have completed */
+        for (int i = 0; i < num_problems; i++) {
+            if (!thread_data[i].completed) {
+                all_completed = 0;
+                break;
+            }
+        }
+
+        /* Brief pause if not all completed */
+        if (!all_completed) {
+            struct timespec ts;
+            ts.tv_sec = 0;
+            ts.tv_nsec = 100000; /* 0.1ms */
+            nanosleep(&ts, NULL);
+        }
+    }
+
+    /* Join all threads to clean up resources */
+    for (int i = 0; i < num_problems; i++) {
+        pthread_join(threads[i], NULL);
+    }
+
+    /* Restore the GIL before working with Python objects */
+    PyEval_RestoreThread(_save);
+
+    /* Check for errors */
+    int any_error = 0;
+    for (int i = 0; i < num_problems; i++) {
+        if (thread_data[i].error_occurred) {
+            any_error = 1;
+            break;
+        }
+    }
+
+    /* Create results */
+    PyObject *results = NULL;
+    if (any_error) {
+        /* Find the first error message */
+        for (int i = 0; i < num_problems; i++) {
+            if (thread_data[i].error_occurred) {
+                PyErr_SetString(PyExc_RuntimeError, thread_data[i].error_msg);
+                break;
+            }
+        }
+    } else {
+        results = PyTuple_New(num_problems);
+        if (!results) {
+            PyErr_SetString(PyExc_MemoryError, "Failed to allocate memory for results");
+        } else {
+            for (int i = 0; i < num_problems; i++) {
+                if (thread_data[i].result) {
+                    PyTuple_SetItem(results, i, thread_data[i].result);
+                    /* PyTuple_SetItem steals the reference */
+                    thread_data[i].result = NULL;
+                } else {
+                    Py_INCREF(Py_None);
+                    PyTuple_SetItem(results, i, Py_None);
+                }
+            }
+        }
+    }
+
+    /* Cleanup */
+    for (int i = 0; i < num_problems; i++) {
+        Py_XDECREF(thread_data[i].args);
+        Py_XDECREF(thread_data[i].result); /* Should be NULL if added to results */
+    }
+    Py_DECREF(opts);
+    free(threads);
+    free(thread_data);
+
+    return results;
+}
+
 
 static PyMethodDef qpSWIFTMethods[] = {
     {"run", method_qpSWIFT, METH_VARARGS | METH_KEYWORDS, "res = qpSWIFT.run(c,h,P,G,A,b,opts) \n"
@@ -1313,6 +1634,13 @@ static PyMethodDef qpSWIFTMethods[] = {
                                                                          "Run the solver with sparse matrix inputs (P, G, A) in CSC format.\n"},
     {"run_sparse_with_box_constraints", method_qp_SWIFT_sparse_with_box, METH_VARARGS | METH_KEYWORDS, "res = qpSWIFT.run_sparse(c, h_box, h, P, G_box, G, A, b, opts) \n"
                                                                          "Run the solver with sparse matrix inputs (P, G, G_box, A) in CSC format.\n"},
+    {"run_sparse_with_box_constraints_batch", (PyCFunction)method_qp_SWIFT_sparse_with_box_batch,
+     METH_VARARGS | METH_KEYWORDS,
+     "res = qpSWIFT.run_sparse_with_box_constraints_batch(args_list, opts=None, use_threading=False)\n"
+     "Solve multiple QP problems in batch with shared options.\n"
+     "args_list: List of argument tuples for each problem\n"
+     "opts: Shared options dictionary for all problems (default empty dict)\n"
+     "use_threading: Whether to use threading (default False)"},
     {NULL, NULL, 0, NULL}
 };
 
