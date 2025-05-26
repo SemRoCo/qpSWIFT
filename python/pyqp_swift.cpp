@@ -164,13 +164,6 @@ QPSolution solve_qp_dense(
     QPSolution solution;
     qp_int n = H.cols();  // Number of variables
 
-    // Debug info
-    std::cout << "Solver options: MAXITER=" << options.maxiter
-              << ", ABSTOL=" << options.abstol 
-              << ", RELTOL=" << options.reltol 
-              << ", SIGMA=" << options.sigma 
-              << ", VERBOSE=" << options.verbose << std::endl;
-
     // Check if H is positive definite
     Eigen::LLT<MatrixXd> lltOfH(H);
     if(lltOfH.info() == Eigen::NumericalIssue) {
@@ -272,13 +265,13 @@ QPSolution solve_qp_dense(
     VectorXd h_copy = h;
     VectorXd b_copy = b_effective;
 
-    std::cout << "Setting up QP problem (dense)...=========================================" << std::endl;
-    std::cout << "Hessian matrix H:\n" << Hessian_copy << std::endl;
-    std::cout << "Gradient vector g:\n" << g_copy.transpose() << std::endl;
-    std::cout << "Equality matrix E:\n" << E_copy << std::endl;
-    std::cout << "Equality bounds b:\n" << b_copy.transpose() << std::endl;
-    std::cout << "Inequality matrix G:\n" << G_copy << std::endl;
-    std::cout << "Inequality bounds h:\n" << h_copy.transpose() << std::endl;
+//    std::cout << "Setting up QP problem (dense)...=========================================" << std::endl;
+//    std::cout << "Hessian matrix H:\n" << Hessian_copy << std::endl;
+//    std::cout << "Gradient vector g:\n" << g_copy.transpose() << std::endl;
+//    std::cout << "Equality matrix E:\n" << E_copy << std::endl;
+//    std::cout << "Equality bounds b:\n" << b_copy.transpose() << std::endl;
+//    std::cout << "Inequality matrix G:\n" << G_copy << std::endl;
+//    std::cout << "Inequality bounds h:\n" << h_copy.transpose() << std::endl;
 
     QP *myQP = QP_SETUP_dense(
         n, m, p,
@@ -305,15 +298,12 @@ QPSolution solve_qp_dense(
     // Apply user options
     apply_options(myQP, options);
 
-    std::cout << "Solving QP problem..." << std::endl;
     qp_int result = QP_SOLVE(myQP);
-    std::cout << "QP solve result: " << result << std::endl;
 
     // Extract solution
     solution.x.resize(n);
     for (int i = 0; i < n; i++) {
         solution.x[i] = myQP->x[i];
-        std::cout << "x[" << i << "] = " << myQP->x[i] << std::endl;
     }
 
     // Extract statistics
@@ -322,10 +312,6 @@ QPSolution solve_qp_dense(
     solution.setup_time = myQP->stats->tsetup;
     solution.solve_time = myQP->stats->tsolve;
     solution.obj_value = myQP->stats->fval;
-
-    std::cout << "Exit flag: " << solution.exit_flag << std::endl;
-    std::cout << "Iterations: " << solution.iterations << std::endl;
-    std::cout << "Objective value: " << solution.obj_value << std::endl;
 
     // Clean up
     QP_CLEANUP_dense(myQP);
@@ -348,13 +334,6 @@ QPSolution solve_qp_sparse(
     // Initialize solution
     QPSolution solution;
     qp_int n = H.cols();  // Number of variables
-
-    // Debug info
-    std::cout << "Solver options: MAXITER=" << options.maxiter
-              << ", ABSTOL=" << options.abstol
-              << ", RELTOL=" << options.reltol
-              << ", SIGMA=" << options.sigma
-              << ", VERBOSE=" << options.verbose << std::endl;
 
     // Make sure all input matrices are in CSC (column-major) format
     SpMat H_csc = H;
@@ -488,188 +467,17 @@ QPSolution solve_qp_sparse(
     }
 
     // Print problem details
-    std::cout << "Setting up QP problem (sparse)...==================================" << std::endl;
-    std::cout << "Hessian matrix H:\n" << H << std::endl;
-    std::cout << "Gradient vector g:\n" << g.transpose() << std::endl;
-    std::cout << "Equality matrix E:\n" << E_effective << std::endl;
-    std::cout << "Equality bounds b:\n" << b_effective.transpose() << std::endl;
-    std::cout << "Inequality matrix G:\n" << G << std::endl;
-    std::cout << "Inequality bounds h:\n" << h.transpose() << std::endl;
+//    std::cout << "Setting up QP problem (sparse)...==================================" << std::endl;
+//    std::cout << "Hessian matrix H:\n" << H << std::endl;
+//    std::cout << "Gradient vector g:\n" << g.transpose() << std::endl;
+//    std::cout << "Equality matrix E:\n" << E_effective << std::endl;
+//    std::cout << "Equality bounds b:\n" << b_effective.transpose() << std::endl;
+//    std::cout << "Inequality matrix G:\n" << G << std::endl;
+//    std::cout << "Inequality bounds h:\n" << h.transpose() << std::endl;
 
     // Create mutable copy of gradient
     VectorXd g_copy = g;
 
-    // Create CSC format arrays for sparse matrices
-    std::vector<qp_int> Pjc(n+1);
-    std::vector<qp_int> Pir(H_csc.nonZeros());
-    std::vector<qp_real> Ppr(H_csc.nonZeros());
-
-    std::copy(H_csc.outerIndexPtr(), H_csc.outerIndexPtr()+n+1, Pjc.begin());
-    std::copy(H_csc.innerIndexPtr(), H_csc.innerIndexPtr() + H_csc.nonZeros(), Pir.begin());
-    std::copy(H_csc.valuePtr(), H_csc.valuePtr() + H_csc.nonZeros(), Ppr.begin());
-
-    std::vector<qp_int> Gjc(n + 1);
-    std::vector<qp_int> Gir(G.nonZeros());
-    std::vector<qp_real> Gpr(G.nonZeros());
-
-    std::copy(G.outerIndexPtr(), G.outerIndexPtr() + (n+1), Gjc.begin());
-    std::copy(G.innerIndexPtr(), G.innerIndexPtr() + G.nonZeros(), Gir.begin());
-    std::copy(G.valuePtr(), G.valuePtr() + G.nonZeros(), Gpr.begin());
-
-    std::vector<qp_int> Ajc(n + 1);
-    std::vector<qp_int> Air(E_effective.nonZeros());
-    std::vector<qp_real> Apr(E_effective.nonZeros());
-
-    // Copy data from E matrix (Ajc, Air, Apr)
-    if (p > 0) {
-        std::copy(E_effective.outerIndexPtr(), E_effective.outerIndexPtr() + (n+1), Ajc.begin());
-        std::copy(E_effective.innerIndexPtr(), E_effective.innerIndexPtr() + E_effective.nonZeros(), Air.begin());
-        std::copy(E_effective.valuePtr(), E_effective.valuePtr() + E_effective.nonZeros(), Apr.begin());
-    } else {
-        // Set all indices to zero for empty matrix
-        for (int j = 0; j <= n; j++) {
-            Ajc[j] = 0;
-        }
-    }
-
-    // Add these debug prints before QP_SETUP_sparse call
-
-    // 1. Check sparse matrices structure and content
-    std::cout << "====== SPARSE DEBUG INFO ======" << std::endl;
-    std::cout << "H_csc: rows=" << H_csc.rows() << ", cols=" << H_csc.cols()
-              << ", nonZeros=" << H_csc.nonZeros() << std::endl;
-    std::cout << "G: rows=" << G.rows() << ", cols=" << G.cols()
-              << ", nonZeros=" << G.nonZeros() << std::endl;
-    if (E_effective.rows() > 0) {
-        std::cout << "E_effective: rows=" << E_effective.rows() << ", cols=" << E_effective.cols()
-                  << ", nonZeros=" << E_effective.nonZeros() << std::endl;
-    }
-
-    // 2. Check sparse matrix storage format
-    std::cout << "H_csc is in ColMajor format: " << (H_csc.IsRowMajor ? "No" : "Yes") << std::endl;
-    std::cout << "G is in ColMajor format: " << (G.IsRowMajor ? "No" : "Yes") << std::endl;
-    if (E_effective.rows() > 0) {
-        std::cout << "E_effective is in ColMajor format: " << (E_effective.IsRowMajor ? "No" : "Yes") << std::endl;
-    }
-
-    // 3. Check pointers to sparse matrix data
-    std::cout << "H_csc.outerIndexPtr address: " << (void*)H_csc.outerIndexPtr() << std::endl;
-    std::cout << "H_csc.innerIndexPtr address: " << (void*)H_csc.innerIndexPtr() << std::endl;
-    std::cout << "H_csc.valuePtr address: " << (void*)H_csc.valuePtr() << std::endl;
-
-    std::cout << "G.outerIndexPtr address: " << (void*)G.outerIndexPtr() << std::endl;
-    std::cout << "G.innerIndexPtr address: " << (void*)G.innerIndexPtr() << std::endl;
-    std::cout << "G.valuePtr address: " << (void*)G.valuePtr() << std::endl;
-
-    // 4. Print the content of CSC format arrays for H matrix
-    std::cout << "H_csc.outerIndexPtr values: ";
-    for (int i = 0; i <= H_csc.cols(); i++) {
-        std::cout << H_csc.outerIndexPtr()[i] << " ";
-    }
-    std::cout << std::endl;
-
-    std::cout << "H_csc.innerIndexPtr values: ";
-    for (int i = 0; i < H_csc.nonZeros(); i++) {
-        std::cout << H_csc.innerIndexPtr()[i] << " ";
-    }
-    std::cout << std::endl;
-
-    std::cout << "H_csc.valuePtr values: ";
-    for (int i = 0; i < H_csc.nonZeros(); i++) {
-        std::cout << H_csc.valuePtr()[i] << " ";
-    }
-    std::cout << std::endl;
-
-    // 5. Check for invalid values in vectors
-    std::cout << "g vector contains valid values: " << (!has_infinities(g_copy) ? "Yes" : "No") << std::endl;
-    std::cout << "h vector contains valid values: " << (!has_infinities(h) ? "Yes" : "No") << std::endl;
-    if (b_effective.size() > 0) {
-        std::cout << "b vector contains valid values: " << (!has_infinities(b_effective) ? "Yes" : "No") << std::endl;
-    }
-
-    // 6. Print first few elements of CSC arrays for G matrix
-    std::cout << "G.outerIndexPtr values: ";
-    for (int i = 0; i <= G.cols(); i++) {
-        std::cout << G.outerIndexPtr()[i] << " ";
-    }
-    std::cout << std::endl;
-
-    std::cout << "G.innerIndexPtr values: ";
-    for (int i = 0; i < G.nonZeros(); i++) {
-        std::cout << G.innerIndexPtr()[i] << " ";
-    }
-    std::cout << std::endl;
-
-    std::cout << "G.valuePtr values: ";
-    for (int i = 0; i < G.nonZeros(); i++) {
-        std::cout << G.valuePtr()[i] << " ";
-    }
-    std::cout << std::endl;
-
-    if (E_effective.rows() > 0) {
-        std::cout << "E_effective.outerIndexPtr values: ";
-        for (int i = 0; i <= E_effective.cols(); i++) {
-            std::cout << E_effective.outerIndexPtr()[i] << " ";
-        }
-        std::cout << std::endl;
-
-        std::cout << "E_effective.innerIndexPtr values: ";
-        for (int i = 0; i < E_effective.nonZeros(); i++) {
-            std::cout << E_effective.innerIndexPtr()[i] << " ";
-        }
-        std::cout << std::endl;
-
-        std::cout << "E_effective.valuePtr values: ";
-        for (int i = 0; i < E_effective.nonZeros(); i++) {
-            std::cout << E_effective.valuePtr()[i] << " ";
-        }
-        std::cout << std::endl;
-    }
-
-    // 7. Check QP dimensions being passed
-    std::cout << "QP dimensions: n=" << n << ", m=" << m << ", p=" << p << std::endl;
-
-    // Check if the sparse matrices are properly compressed
-    std::cout << "Making sure matrices are compressed before passing to solver..." << std::endl;
-    H_csc.makeCompressed();
-    G.makeCompressed();
-    if (E_effective.rows() > 0) {
-        E_effective.makeCompressed();
-    }
-
-    // Check if any of the sparse matrices have uninitialized or NaN values
-    bool has_bad_values = false;
-    for (int i = 0; i < H_csc.nonZeros(); i++) {
-        if (!std::isfinite(H_csc.valuePtr()[i])) {
-            std::cout << "WARNING: H_csc contains non-finite values!" << std::endl;
-            has_bad_values = true;
-            break;
-        }
-    }
-
-    for (int i = 0; i < G.nonZeros(); i++) {
-        if (!std::isfinite(G.valuePtr()[i])) {
-            std::cout << "WARNING: G contains non-finite values!" << std::endl;
-            has_bad_values = true;
-            break;
-        }
-    }
-
-    if (E_effective.rows() > 0) {
-        for (int i = 0; i < E_effective.nonZeros(); i++) {
-            if (!std::isfinite(E_effective.valuePtr()[i])) {
-                std::cout << "WARNING: E_effective contains non-finite values!" << std::endl;
-                has_bad_values = true;
-                break;
-            }
-        }
-    }
-
-    // Make sure you're using the correct ordering parameter
-//    std::cout << "Using ordering parameter: " << (ordering_param == ROW_MAJOR_ORDERING ? "ROW_MAJOR_ORDERING" :
-//                                           (ordering_param == COLUMN_MAJOR_ORDERING ? "COLUMN_MAJOR_ORDERING" : "UNKNOWN")) << std::endl;
-
-    // Call qpSWIFT setup function
     QP *myQP = QP_SETUP(
         n, m, p,
         H_csc.outerIndexPtr(), H_csc.innerIndexPtr(), H_csc.valuePtr(),
@@ -697,15 +505,12 @@ QPSolution solve_qp_sparse(
     apply_options(myQP, options);
 
     // Solve the QP
-    std::cout << "Solving QP problem (sparse)..." << std::endl;
     qp_int result = QP_SOLVE(myQP);
-    std::cout << "QP solve result: " << result << std::endl;
 
     // Extract solution
     solution.x.resize(n);
     for (int i = 0; i < n; i++) {
         solution.x[i] = myQP->x[i];
-        std::cout << "x[" << i << "] = " << myQP->x[i] << std::endl;
     }
 
     // Extract statistics
@@ -714,10 +519,6 @@ QPSolution solve_qp_sparse(
     solution.setup_time = myQP->stats->tsetup;
     solution.solve_time = myQP->stats->tsolve;
     solution.obj_value = myQP->stats->fval;
-
-    std::cout << "Exit flag: " << solution.exit_flag << std::endl;
-    std::cout << "Iterations: " << solution.iterations << std::endl;
-    std::cout << "Objective value: " << solution.obj_value << std::endl;
 
     // Clean up
     QP_CLEANUP(myQP);
