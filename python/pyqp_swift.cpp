@@ -13,6 +13,7 @@
 
 namespace py = pybind11;
 using namespace Eigen;
+using SpMat = Eigen::SparseMatrix<qp_real, Eigen::ColMajor, qp_int>;
 
 // Structure to hold solution data
 struct QPSolution {
@@ -333,13 +334,13 @@ QPSolution solve_qp_dense(
 }
 
 QPSolution solve_qp_sparse(
-    const Eigen::SparseMatrix<double>& H,
+    const SpMat& H,
     const VectorXd& g,
     const VectorXd& lb,
     const VectorXd& ub,
-    const Eigen::SparseMatrix<double>& E,
+    const SpMat& E,
     const VectorXd& b,
-    const Eigen::SparseMatrix<double>& A,
+    const SpMat& A,
     const VectorXd& lbA,
     const VectorXd& ubA,
     const QPOptions& options
@@ -356,9 +357,9 @@ QPSolution solve_qp_sparse(
               << ", VERBOSE=" << options.verbose << std::endl;
 
     // Make sure all input matrices are in CSC (column-major) format
-    Eigen::SparseMatrix<double> H_csc = H;
-    Eigen::SparseMatrix<double> E_csc = E;
-    Eigen::SparseMatrix<double> A_csc = A;
+    SpMat H_csc = H;
+    SpMat E_csc = E;
+    SpMat A_csc = A;
 
     if (!H_csc.isCompressed()) H_csc.makeCompressed();
     if (!E_csc.isCompressed()) E_csc.makeCompressed();
@@ -459,7 +460,7 @@ QPSolution solve_qp_sparse(
 
     // Create the G matrix and h vector
     int m = constraint_idx;  // Total number of inequality constraints
-    Eigen::SparseMatrix<double> G(m, n);
+    SpMat G(m, n);
     VectorXd h(m);
 
     G.setFromTriplets(G_triplets.begin(), G_triplets.end());
@@ -471,7 +472,7 @@ QPSolution solve_qp_sparse(
 
     // Process equality constraints
     qp_int p = 0;
-    Eigen::SparseMatrix<double> E_effective(0, n);
+    SpMat E_effective(0, n);
     VectorXd b_effective;
 
     if (E_csc.rows() > 0) {
@@ -488,95 +489,42 @@ QPSolution solve_qp_sparse(
 
     // Print problem details
     std::cout << "Setting up QP problem (sparse)...==================================" << std::endl;
-    std::cout << "Variables: " << n << ", Inequality constraints: " << m << ", Equality constraints: " << p << std::endl;
-
-    // Print matrices for debugging
-    std::cout << "Hessian matrix H:" << std::endl;
-    MatrixXd H_dense = MatrixXd(H_csc);
-    for (int i = 0; i < H_dense.rows(); i++) {
-        for (int j = 0; j < H_dense.cols(); j++) {
-            std::cout << H_dense(i, j) << " ";
-        }
-        std::cout << std::endl;
-    }
-
-    std::cout << "Gradient vector g:" << std::endl;
-    std::cout << g.transpose() << std::endl;
-
-    std::cout << "Equality matrix E:" << std::endl;
-    if (p > 0) {
-        MatrixXd E_dense = MatrixXd(E_effective);
-        for (int i = 0; i < E_dense.rows(); i++) {
-            for (int j = 0; j < E_dense.cols(); j++) {
-                std::cout << E_dense(i, j) << " ";
-            }
-            std::cout << std::endl;
-        }
-    }
-
-    std::cout << "Equality bounds b:" << std::endl;
-    if (p > 0) {
-        std::cout << b_effective.transpose() << std::endl;
-    }
-
-    std::cout << "Inequality matrix G:" << std::endl;
-    MatrixXd G_dense = MatrixXd(G);
-    for (int i = 0; i < G_dense.rows(); i++) {
-        for (int j = 0; j < G_dense.cols(); j++) {
-            std::cout << G_dense(i, j) << " ";
-        }
-        std::cout << std::endl;
-    }
-
-    std::cout << "Inequality bounds h:" << std::endl;
-    std::cout << h.transpose() << std::endl;
+    std::cout << "Hessian matrix H:\n" << H << std::endl;
+    std::cout << "Gradient vector g:\n" << g.transpose() << std::endl;
+    std::cout << "Equality matrix E:\n" << E_effective << std::endl;
+    std::cout << "Equality bounds b:\n" << b_effective.transpose() << std::endl;
+    std::cout << "Inequality matrix G:\n" << G << std::endl;
+    std::cout << "Inequality bounds h:\n" << h.transpose() << std::endl;
 
     // Create mutable copy of gradient
     VectorXd g_copy = g;
 
     // Create CSC format arrays for sparse matrices
-    std::vector<qp_int> Pjc(n + 1);
+    std::vector<qp_int> Pjc(n+1);
     std::vector<qp_int> Pir(H_csc.nonZeros());
     std::vector<qp_real> Ppr(H_csc.nonZeros());
+
+    std::copy(H_csc.outerIndexPtr(), H_csc.outerIndexPtr()+n+1, Pjc.begin());
+    std::copy(H_csc.innerIndexPtr(), H_csc.innerIndexPtr() + H_csc.nonZeros(), Pir.begin());
+    std::copy(H_csc.valuePtr(), H_csc.valuePtr() + H_csc.nonZeros(), Ppr.begin());
 
     std::vector<qp_int> Gjc(n + 1);
     std::vector<qp_int> Gir(G.nonZeros());
     std::vector<qp_real> Gpr(G.nonZeros());
 
+    std::copy(G.outerIndexPtr(), G.outerIndexPtr() + (n+1), Gjc.begin());
+    std::copy(G.innerIndexPtr(), G.innerIndexPtr() + G.nonZeros(), Gir.begin());
+    std::copy(G.valuePtr(), G.valuePtr() + G.nonZeros(), Gpr.begin());
+
     std::vector<qp_int> Ajc(n + 1);
     std::vector<qp_int> Air(E_effective.nonZeros());
     std::vector<qp_real> Apr(E_effective.nonZeros());
 
-    // Copy data from H matrix (Pjc, Pir, Ppr)
-    for (int j = 0; j <= n; j++) {
-        Pjc[j] = H_csc.outerIndexPtr()[j];
-    }
-
-    for (int i = 0; i < H_csc.nonZeros(); i++) {
-        Pir[i] = H_csc.innerIndexPtr()[i];
-        Ppr[i] = H_csc.valuePtr()[i];
-    }
-
-    // Copy data from G matrix (Gjc, Gir, Gpr)
-    for (int j = 0; j <= n; j++) {
-        Gjc[j] = G.outerIndexPtr()[j];
-    }
-
-    for (int i = 0; i < G.nonZeros(); i++) {
-        Gir[i] = G.innerIndexPtr()[i];
-        Gpr[i] = G.valuePtr()[i];
-    }
-
     // Copy data from E matrix (Ajc, Air, Apr)
     if (p > 0) {
-        for (int j = 0; j <= n; j++) {
-            Ajc[j] = E_effective.outerIndexPtr()[j];
-        }
-
-        for (int i = 0; i < E_effective.nonZeros(); i++) {
-            Air[i] = E_effective.innerIndexPtr()[i];
-            Apr[i] = E_effective.valuePtr()[i];
-        }
+        std::copy(E_effective.outerIndexPtr(), E_effective.outerIndexPtr() + (n+1), Ajc.begin());
+        std::copy(E_effective.innerIndexPtr(), E_effective.innerIndexPtr() + E_effective.nonZeros(), Air.begin());
+        std::copy(E_effective.valuePtr(), E_effective.valuePtr() + E_effective.nonZeros(), Apr.begin());
     } else {
         // Set all indices to zero for empty matrix
         for (int j = 0; j <= n; j++) {
@@ -584,16 +532,153 @@ QPSolution solve_qp_sparse(
         }
     }
 
+    // Add these debug prints before QP_SETUP_sparse call
+
+    // 1. Check sparse matrices structure and content
+    std::cout << "====== SPARSE DEBUG INFO ======" << std::endl;
+    std::cout << "H_csc: rows=" << H_csc.rows() << ", cols=" << H_csc.cols()
+              << ", nonZeros=" << H_csc.nonZeros() << std::endl;
+    std::cout << "G: rows=" << G.rows() << ", cols=" << G.cols()
+              << ", nonZeros=" << G.nonZeros() << std::endl;
+    if (E_effective.rows() > 0) {
+        std::cout << "E_effective: rows=" << E_effective.rows() << ", cols=" << E_effective.cols()
+                  << ", nonZeros=" << E_effective.nonZeros() << std::endl;
+    }
+
+    // 2. Check sparse matrix storage format
+    std::cout << "H_csc is in ColMajor format: " << (H_csc.IsRowMajor ? "No" : "Yes") << std::endl;
+    std::cout << "G is in ColMajor format: " << (G.IsRowMajor ? "No" : "Yes") << std::endl;
+    if (E_effective.rows() > 0) {
+        std::cout << "E_effective is in ColMajor format: " << (E_effective.IsRowMajor ? "No" : "Yes") << std::endl;
+    }
+
+    // 3. Check pointers to sparse matrix data
+    std::cout << "H_csc.outerIndexPtr address: " << (void*)H_csc.outerIndexPtr() << std::endl;
+    std::cout << "H_csc.innerIndexPtr address: " << (void*)H_csc.innerIndexPtr() << std::endl;
+    std::cout << "H_csc.valuePtr address: " << (void*)H_csc.valuePtr() << std::endl;
+
+    std::cout << "G.outerIndexPtr address: " << (void*)G.outerIndexPtr() << std::endl;
+    std::cout << "G.innerIndexPtr address: " << (void*)G.innerIndexPtr() << std::endl;
+    std::cout << "G.valuePtr address: " << (void*)G.valuePtr() << std::endl;
+
+    // 4. Print the content of CSC format arrays for H matrix
+    std::cout << "H_csc.outerIndexPtr values: ";
+    for (int i = 0; i <= H_csc.cols(); i++) {
+        std::cout << H_csc.outerIndexPtr()[i] << " ";
+    }
+    std::cout << std::endl;
+
+    std::cout << "H_csc.innerIndexPtr values: ";
+    for (int i = 0; i < H_csc.nonZeros(); i++) {
+        std::cout << H_csc.innerIndexPtr()[i] << " ";
+    }
+    std::cout << std::endl;
+
+    std::cout << "H_csc.valuePtr values: ";
+    for (int i = 0; i < H_csc.nonZeros(); i++) {
+        std::cout << H_csc.valuePtr()[i] << " ";
+    }
+    std::cout << std::endl;
+
+    // 5. Check for invalid values in vectors
+    std::cout << "g vector contains valid values: " << (!has_infinities(g_copy) ? "Yes" : "No") << std::endl;
+    std::cout << "h vector contains valid values: " << (!has_infinities(h) ? "Yes" : "No") << std::endl;
+    if (b_effective.size() > 0) {
+        std::cout << "b vector contains valid values: " << (!has_infinities(b_effective) ? "Yes" : "No") << std::endl;
+    }
+
+    // 6. Print first few elements of CSC arrays for G matrix
+    std::cout << "G.outerIndexPtr values: ";
+    for (int i = 0; i <= G.cols(); i++) {
+        std::cout << G.outerIndexPtr()[i] << " ";
+    }
+    std::cout << std::endl;
+
+    std::cout << "G.innerIndexPtr values: ";
+    for (int i = 0; i < G.nonZeros(); i++) {
+        std::cout << G.innerIndexPtr()[i] << " ";
+    }
+    std::cout << std::endl;
+
+    std::cout << "G.valuePtr values: ";
+    for (int i = 0; i < G.nonZeros(); i++) {
+        std::cout << G.valuePtr()[i] << " ";
+    }
+    std::cout << std::endl;
+
+    if (E_effective.rows() > 0) {
+        std::cout << "E_effective.outerIndexPtr values: ";
+        for (int i = 0; i <= E_effective.cols(); i++) {
+            std::cout << E_effective.outerIndexPtr()[i] << " ";
+        }
+        std::cout << std::endl;
+
+        std::cout << "E_effective.innerIndexPtr values: ";
+        for (int i = 0; i < E_effective.nonZeros(); i++) {
+            std::cout << E_effective.innerIndexPtr()[i] << " ";
+        }
+        std::cout << std::endl;
+
+        std::cout << "E_effective.valuePtr values: ";
+        for (int i = 0; i < E_effective.nonZeros(); i++) {
+            std::cout << E_effective.valuePtr()[i] << " ";
+        }
+        std::cout << std::endl;
+    }
+
+    // 7. Check QP dimensions being passed
+    std::cout << "QP dimensions: n=" << n << ", m=" << m << ", p=" << p << std::endl;
+
+    // Check if the sparse matrices are properly compressed
+    std::cout << "Making sure matrices are compressed before passing to solver..." << std::endl;
+    H_csc.makeCompressed();
+    G.makeCompressed();
+    if (E_effective.rows() > 0) {
+        E_effective.makeCompressed();
+    }
+
+    // Check if any of the sparse matrices have uninitialized or NaN values
+    bool has_bad_values = false;
+    for (int i = 0; i < H_csc.nonZeros(); i++) {
+        if (!std::isfinite(H_csc.valuePtr()[i])) {
+            std::cout << "WARNING: H_csc contains non-finite values!" << std::endl;
+            has_bad_values = true;
+            break;
+        }
+    }
+
+    for (int i = 0; i < G.nonZeros(); i++) {
+        if (!std::isfinite(G.valuePtr()[i])) {
+            std::cout << "WARNING: G contains non-finite values!" << std::endl;
+            has_bad_values = true;
+            break;
+        }
+    }
+
+    if (E_effective.rows() > 0) {
+        for (int i = 0; i < E_effective.nonZeros(); i++) {
+            if (!std::isfinite(E_effective.valuePtr()[i])) {
+                std::cout << "WARNING: E_effective contains non-finite values!" << std::endl;
+                has_bad_values = true;
+                break;
+            }
+        }
+    }
+
+    // Make sure you're using the correct ordering parameter
+//    std::cout << "Using ordering parameter: " << (ordering_param == ROW_MAJOR_ORDERING ? "ROW_MAJOR_ORDERING" :
+//                                           (ordering_param == COLUMN_MAJOR_ORDERING ? "COLUMN_MAJOR_ORDERING" : "UNKNOWN")) << std::endl;
+
     // Call qpSWIFT setup function
     QP *myQP = QP_SETUP(
         n, m, p,
-        Pjc.data(), Pir.data(), Ppr.data(),
-        Ajc.data(), Air.data(), Apr.data(),
-        Gjc.data(), Gir.data(), Gpr.data(),
+        H_csc.outerIndexPtr(), H_csc.innerIndexPtr(), H_csc.valuePtr(),
+        E_effective.outerIndexPtr(), E_effective.innerIndexPtr(), E_effective.valuePtr(),
+        G.outerIndexPtr(), G.innerIndexPtr(), G.valuePtr(),
         g_copy.data(),
         h.data(),
         b_effective.data(),
-        options.sigma,
+        0.0,
         NULL  // No permutation
     );
 
@@ -620,7 +705,7 @@ QPSolution solve_qp_sparse(
     solution.x.resize(n);
     for (int i = 0; i < n; i++) {
         solution.x[i] = myQP->x[i];
-        std::cout <<
+        std::cout << "x[" << i << "] = " << myQP->x[i] << std::endl;
     }
 
     // Extract statistics
@@ -700,10 +785,10 @@ m.def("solve",
 
     // Sparse version with all constraints and options
     m.def("solve_sparse",
-        [](const Eigen::SparseMatrix<double>& H, const VectorXd& g,
+        [](const SpMat& H, const VectorXd& g,
            const VectorXd& lb, const VectorXd& ub,
-           const Eigen::SparseMatrix<double>& E, const VectorXd& b,
-           const Eigen::SparseMatrix<double>& A, const VectorXd& lbA, const VectorXd& ubA,
+           const SpMat& E, const VectorXd& b,
+           const SpMat& A, const VectorXd& lbA, const VectorXd& ubA,
            const py::dict& options_dict) {
             QPOptions options = dict_to_options(options_dict);
             QPSolution sol = solve_qp_sparse(H, g, lb, ub, E, b, A, lbA, ubA, options);
@@ -711,8 +796,8 @@ m.def("solve",
         },
         py::arg("H"), py::arg("g"),
         py::arg("lb") = VectorXd(), py::arg("ub") = VectorXd(),
-        py::arg("E") = Eigen::SparseMatrix<double>(), py::arg("b") = VectorXd(),
-        py::arg("A") = Eigen::SparseMatrix<double>(), py::arg("lbA") = VectorXd(), py::arg("ubA") = VectorXd(),
+        py::arg("E") = SpMat(), py::arg("b") = VectorXd(),
+        py::arg("A") = SpMat(), py::arg("lbA") = VectorXd(), py::arg("ubA") = VectorXd(),
         py::arg("options") = py::dict(),
         "Solve a QP with sparse matrices"
     );
@@ -735,9 +820,9 @@ m.def("solve",
 
     m.def("run_sparse",
         [](const VectorXd& c, const VectorXd& h,
-           const Eigen::SparseMatrix<double>& P,
-           const Eigen::SparseMatrix<double>& G,
-           const Eigen::SparseMatrix<double>& A,
+           const SpMat& P,
+           const SpMat& G,
+           const SpMat& A,
            const VectorXd& b,
            const py::dict& options_dict) {
             // Convert options dict to QPOptions
@@ -746,7 +831,7 @@ m.def("solve",
             return sol;
         },
         py::arg("c"), py::arg("h"), py::arg("P"), py::arg("G"),
-        py::arg("A") = Eigen::SparseMatrix<double>(), py::arg("b") = VectorXd(),
+        py::arg("A") = SpMat(), py::arg("b") = VectorXd(),
         py::arg("options") = py::dict(),
         "Legacy interface (sparse): min 0.5*x'Px + c'x s.t. Gx <= h, Ax = b"
     );

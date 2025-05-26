@@ -93,6 +93,55 @@ def test_solve_eq_as_ineq():
     solve_and_verify_qp_solution(H, g, lb, ub, E, b, A, lbA, ubA)
 
 
+def test_solve_eq_and_ineq():
+    H = np.array([[1.0, 0.0], [0.0, 1.0]])  # Identity matrix for quadratic cost
+    g = np.array([0.0, 0.0])  # No linear cost
+
+    E = np.array([[1.,0]])
+    b = np.array([1.])
+
+    A = np.array([[0.0, 1.0]])
+    lbA = np.array([-np.inf])
+    ubA = np.array([-0.5])
+
+    lb = np.array([-np.inf, -np.inf])
+    ub = np.array([np.inf, np.inf])
+
+    solve_and_verify_qp_solution(H, g, lb, ub, E, b, A, lbA, ubA)
+
+def test_solve_eq_as_ineq_1_var():
+    H = np.array([[1.0]])  # Identity matrix for quadratic cost
+    g = np.array([0.0])  # No linear cost
+
+    E = np.zeros((0, 1))
+    b = np.array([])
+
+    A = np.array([[1.0]])
+    lbA = np.array([-np.inf])
+    ubA = np.array([-1.0])
+
+    lb = np.array([-np.inf])
+    ub = np.array([np.inf])
+
+    solve_and_verify_qp_solution(H, g, lb, ub, E, b, A, lbA, ubA)
+
+def test_solve_eq_as_ineq_1_var2():
+    H = np.array([[1.0]])  # Identity matrix for quadratic cost
+    g = np.array([0.0])  # No linear cost
+
+    E = np.array([1.0])
+    b = np.array([-2])
+
+    A = np.array([[1.0]])
+    lbA = np.array([-np.inf])
+    ubA = np.array([1.0])
+
+    lb = np.array([-np.inf])
+    ub = np.array([np.inf])
+
+    solve_and_verify_qp_solution(H, g, lb, ub, E, b, A, lbA, ubA)
+
+
 def test_solve_eq():
     H = np.array([[1.0, 0.0], [0.0, 1.0]])  # Identity matrix for quadratic cost
     g = np.array([0.0, 0.0])  # No linear cost
@@ -164,6 +213,5 @@ def test_solve_qp_complex():
 #     lb = np.array([-np.inf, -np.inf])
 #     ub = np.array([np.inf, np.inf])
 #
-#     x = qpSWIFT.solve(H, g, lb, ub, E, b, A, lbA, ubA, options)
-#
-#     verify_qp_solution(x, lb, ub, E, b, A, lbA, ubA)
+#     solve_and_verify_qp_solution(H, g, lb, ub, E, b, A, lbA, ubA)
+
