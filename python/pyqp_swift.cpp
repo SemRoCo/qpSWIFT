@@ -17,13 +17,14 @@ using SpMat = Eigen::SparseMatrix<qp_real, Eigen::ColMajor, qp_int>;
 
 // Structure to hold solution data
 struct QPSolution {
-    std::vector<double> x;
+    py::array_t<double> x;
     int exit_flag;
     int iterations;
     double setup_time;
     double solve_time;
     double obj_value;
 };
+
 
 // Structure to hold solver options
 struct QPOptions {
@@ -164,12 +165,6 @@ QPSolution solve_qp_dense(
     QPSolution solution;
     qp_int n = H.cols();  // Number of variables
 
-    // Check if H is positive definite
-    Eigen::LLT<MatrixXd> lltOfH(H);
-    if(lltOfH.info() == Eigen::NumericalIssue) {
-        std::cout << "WARNING: H is not positive definite!" << std::endl;
-    }
-
     // Prepare constraint matrices
     MatrixXd G_box, G_linear;
     VectorXd h_box, h_linear;
@@ -292,6 +287,7 @@ QPSolution solve_qp_dense(
         solution.setup_time = 0;
         solution.solve_time = 0;
         solution.obj_value = 0;
+        solution.x = py::array_t<double>(0);  // Empty NumPy array
         return solution;
     }
     
@@ -301,9 +297,11 @@ QPSolution solve_qp_dense(
     qp_int result = QP_SOLVE(myQP);
 
     // Extract solution
-    solution.x.resize(n);
+    solution.x = py::array_t<double>(n);
+    py::buffer_info buf = solution.x.request();
+    double* ptr = static_cast<double*>(buf.ptr);
     for (int i = 0; i < n; i++) {
-        solution.x[i] = myQP->x[i];
+        ptr[i] = myQP->x[i];
     }
 
     // Extract statistics
@@ -339,10 +337,6 @@ QPSolution solve_qp_sparse(
     SpMat H_csc = H;
     SpMat E_csc = E;
     SpMat A_csc = A;
-
-    if (!H_csc.isCompressed()) H_csc.makeCompressed();
-    if (!E_csc.isCompressed()) E_csc.makeCompressed();
-    if (!A_csc.isCompressed()) A_csc.makeCompressed();
 
     // Create constraint matrices
     std::vector<Eigen::Triplet<double>> G_triplets;
@@ -404,35 +398,31 @@ QPSolution solve_qp_sparse(
             ubA_effective = VectorXd::Constant(A_csc.rows(), INFINITY);
         }
 
-        // Create temporary dense matrix for easier row access
-        MatrixXd A_dense(A_csc.rows(), A_csc.cols());
-        A_dense = MatrixXd(A_csc);
-
         // Add lower bound constraints: -A*x <= -lbA
-        for (int i = 0; i < A_csc.rows(); i++) {
-            if (std::isfinite(lbA_effective[i])) {
-                for (int j = 0; j < n; j++) {
-                    double val = A_dense(i, j);
-                    if (val != 0) {
-                        G_triplets.push_back(Eigen::Triplet<double>(constraint_idx, j, -val));
-                    }
-                }
-                h_values.push_back(-lbA_effective[i]);
-                constraint_idx++;
-            }
-        }
+        if (A_csc.rows() > 0) {
+            // Create temporary CSR matrix for efficient row access
+            Eigen::SparseMatrix<double, Eigen::RowMajor> A_csr(A_csc);
 
-        // Add upper bound constraints: A*x <= ubA
-        for (int i = 0; i < A_csc.rows(); i++) {
-            if (std::isfinite(ubA_effective[i])) {
-                for (int j = 0; j < n; j++) {
-                    double val = A_dense(i, j);
-                    if (val != 0) {
-                        G_triplets.push_back(Eigen::Triplet<double>(constraint_idx, j, val));
+            // Add lower bound constraints: -A*x <= -lbA
+            for (int i = 0; i < A_csr.rows(); i++) {
+                if (std::isfinite(lbA_effective[i])) {
+                    for (Eigen::SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(A_csr, i); it; ++it) {
+                        G_triplets.push_back(Eigen::Triplet<double>(constraint_idx, it.col(), -it.value()));
                     }
+                    h_values.push_back(-lbA_effective[i]);
+                    constraint_idx++;
                 }
-                h_values.push_back(ubA_effective[i]);
-                constraint_idx++;
+            }
+
+            // Add upper bound constraints: A*x <= ubA
+            for (int i = 0; i < A_csr.rows(); i++) {
+                if (std::isfinite(ubA_effective[i])) {
+                    for (Eigen::SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(A_csr, i); it; ++it) {
+                        G_triplets.push_back(Eigen::Triplet<double>(constraint_idx, it.col(), it.value()));
+                    }
+                    h_values.push_back(ubA_effective[i]);
+                    constraint_idx++;
+                }
             }
         }
     }
@@ -497,7 +487,7 @@ QPSolution solve_qp_sparse(
         solution.setup_time = 0;
         solution.solve_time = 0;
         solution.obj_value = 0;
-        solution.x.resize(0);
+        solution.x = py::array_t<double>(0);  // Empty NumPy array
         return solution;
     }
 
@@ -507,10 +497,11 @@ QPSolution solve_qp_sparse(
     // Solve the QP
     qp_int result = QP_SOLVE(myQP);
 
-    // Extract solution
-    solution.x.resize(n);
+    solution.x = py::array_t<double>(n);
+    py::buffer_info buf = solution.x.request();
+    double* ptr = static_cast<double*>(buf.ptr);
     for (int i = 0; i < n; i++) {
-        solution.x[i] = myQP->x[i];
+        ptr[i] = myQP->x[i];
     }
 
     // Extract statistics
@@ -574,7 +565,7 @@ m.def("solve",
        const py::dict& options_dict) {
         QPOptions options = dict_to_options(options_dict);
         QPSolution sol = solve_qp_dense(H, g, lb, ub, E, b, A, lbA, ubA, options);
-        return py::array_t<double>(sol.x.size(), sol.x.data());
+        return sol;
     },
     py::arg("H"), py::arg("g"),
     py::arg("lb") = VectorXd(), py::arg("ub") = VectorXd(),
@@ -593,7 +584,7 @@ m.def("solve",
            const py::dict& options_dict) {
             QPOptions options = dict_to_options(options_dict);
             QPSolution sol = solve_qp_sparse(H, g, lb, ub, E, b, A, lbA, ubA, options);
-            return py::array_t<double>(sol.x.size(), sol.x.data());
+            return sol;
         },
         py::arg("H"), py::arg("g"),
         py::arg("lb") = VectorXd(), py::arg("ub") = VectorXd(),
@@ -602,6 +593,39 @@ m.def("solve",
         py::arg("options") = py::dict(),
         "Solve a QP with sparse matrices"
     );
+
+    m.def("solve_sparse_H_diag",
+        [](const VectorXd& H, const VectorXd& g,
+           const VectorXd& lb, const VectorXd& ub,
+           const SpMat& E, const VectorXd& b,
+           const SpMat& A, const VectorXd& lbA, const VectorXd& ubA,
+           const py::dict& options_dict) {
+            qp_int n = H.size();
+            SpMat H_diag(n, n);
+
+             // Create triplet list for diagonal elements
+            std::vector<Eigen::Triplet<double>> triplets;
+            triplets.reserve(n);
+
+            for (int i = 0; i < n; i++) {
+                triplets.push_back(Eigen::Triplet<double>(i, i, H(i)));
+            }
+
+            H_diag.setFromTriplets(triplets.begin(), triplets.end());
+            H_diag.makeCompressed();
+
+            QPOptions options = dict_to_options(options_dict);
+            QPSolution sol = solve_qp_sparse(H_diag, g, lb, ub, E, b, A, lbA, ubA, options);
+            return sol;
+        },
+        py::arg("H"), py::arg("g"),
+        py::arg("lb") = VectorXd(), py::arg("ub") = VectorXd(),
+        py::arg("E") = SpMat(), py::arg("b") = VectorXd(),
+        py::arg("A") = SpMat(), py::arg("lbA") = VectorXd(), py::arg("ubA") = VectorXd(),
+        py::arg("options") = py::dict(),
+        "Solve a QP with a diagonal Hessian matrix (provided as a vector of diagonal elements)"
+    );
+
 
     // Backwards compatibility with the old interface
     m.def("run",
