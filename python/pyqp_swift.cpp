@@ -16,7 +16,7 @@ using namespace Eigen;
 using SpMat = Eigen::SparseMatrix<qp_real, Eigen::ColMajor, qp_int>;
 
 // Structure to hold solution data
-struct QPSolution {
+struct __attribute__((visibility("hidden"))) QPSolution {
     py::array_t<double> x;
     int exit_flag;
     int iterations;
