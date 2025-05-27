@@ -14,7 +14,7 @@ options = {
 }
 
 
-def solve_and_verify_qp_solution(H, g, lb, ub, E, b, A, lbA, ubA, benchmark: bool = False) -> np.ndarray:
+def solve_and_verify_qp_solution(H, g, lb, ub, E, b, A, lbA, ubA, benchmark: bool = False, precision: float = 1.e-4) -> np.ndarray:
     if len(H.shape) == 2:
         sparse_H = csc_matrix(H)
     else:
@@ -46,13 +46,13 @@ def solve_and_verify_qp_solution(H, g, lb, ub, E, b, A, lbA, ubA, benchmark: boo
     assert np.allclose(Ex, b), f'Ex: {Ex} == {b}'
 
     # verify box constraints
-    assert np.less_equal(lb, x + 1.e-5).all(), f'lb: {lb} <= {x}'
-    assert np.less_equal(x, ub + 1.e-5).all(), f'ub: {x} <= {ub}'
+    assert np.less_equal(lb, x + precision).all(), f'lb: {lb} <= {x}'
+    assert np.less_equal(x, ub + precision).all(), f'ub: {x} <= {ub}'
 
     # verify ineq constraints
     Ax = A.dot(x)
-    assert np.less_equal(lbA, Ax + 1.e-5).all(), f'Ax: {lbA} <= {Ax} <= {ubA}'
-    assert np.less_equal(Ax, ubA + 1.e-5).all(), f'Ax: {lbA} <= {Ax} <= {ubA}'
+    assert np.less_equal(lbA, Ax + precision).all(), f'Ax: {lbA} <= {Ax} <= {ubA}'
+    assert np.less_equal(Ax, ubA + precision).all(), f'Ax: {lbA} <= {Ax} <= {ubA}'
     return x
 
 

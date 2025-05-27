@@ -17,7 +17,8 @@ using SpMat = Eigen::SparseMatrix<qp_real, Eigen::ColMajor, qp_int>;
 
 // Structure to hold solution data
 struct __attribute__((visibility("hidden"))) QPSolution {
-    py::array_t<double> x;
+//    py::array_t<double> x;
+    std::vector<double> raw_x;
     int exit_flag;
     int iterations;
     double setup_time;
@@ -287,7 +288,6 @@ QPSolution solve_qp_dense(
         solution.setup_time = 0;
         solution.solve_time = 0;
         solution.obj_value = 0;
-        solution.x = py::array_t<double>(0);  // Empty NumPy array
         return solution;
     }
     
@@ -296,16 +296,13 @@ QPSolution solve_qp_dense(
 
     qp_int result = QP_SOLVE(myQP);
 
-    // Extract solution
-    solution.x = py::array_t<double>(n);
-    py::buffer_info buf = solution.x.request();
-    double* ptr = static_cast<double*>(buf.ptr);
+    solution.raw_x = std::vector<double>(n);
     for (int i = 0; i < n; i++) {
-        ptr[i] = myQP->x[i];
+        solution.raw_x[i] = myQP->x[i];
     }
 
     // Extract statistics
-    solution.exit_flag = myQP->stats->Flag;
+    solution.exit_flag = result;
     solution.iterations = myQP->stats->IterationCount;
     solution.setup_time = myQP->stats->tsetup;
     solution.solve_time = myQP->stats->tsolve;
@@ -487,25 +484,19 @@ QPSolution solve_qp_sparse(
         solution.setup_time = 0;
         solution.solve_time = 0;
         solution.obj_value = 0;
-        solution.x = py::array_t<double>(0);  // Empty NumPy array
         return solution;
     }
 
-    // Apply user options
     apply_options(myQP, options);
 
-    // Solve the QP
     qp_int result = QP_SOLVE(myQP);
 
-    solution.x = py::array_t<double>(n);
-    py::buffer_info buf = solution.x.request();
-    double* ptr = static_cast<double*>(buf.ptr);
+    solution.raw_x = std::vector<double>(n);
     for (int i = 0; i < n; i++) {
-        ptr[i] = myQP->x[i];
+        solution.raw_x[i] = myQP->x[i];
     }
 
-    // Extract statistics
-    solution.exit_flag = myQP->stats->Flag;
+    solution.exit_flag = result;
     solution.iterations = myQP->stats->IterationCount;
     solution.setup_time = myQP->stats->tsetup;
     solution.solve_time = myQP->stats->tsolve;
@@ -549,12 +540,20 @@ PYBIND11_MODULE(qpSWIFT, m) {
     m.doc() = "Python bindings for qpSWIFT quadratic programming solver";
 
     py::class_<QPSolution>(m, "QPSolution")
-        .def_readonly("x", &QPSolution::x, "Solution vector")
         .def_readonly("exit_flag", &QPSolution::exit_flag, "Exit flag (0: success, >0: error)")
         .def_readonly("iterations", &QPSolution::iterations, "Number of iterations")
         .def_readonly("setup_time", &QPSolution::setup_time, "Setup time in seconds")
         .def_readonly("solve_time", &QPSolution::solve_time, "Solve time in seconds")
-        .def_readonly("obj_value", &QPSolution::obj_value, "Objective function value");
+        .def_readonly("obj_value", &QPSolution::obj_value, "Objective function value")
+        .def_property_readonly("x", [](QPSolution &self) {
+            ssize_t N = self.raw_x.size();
+            return py::array_t<double>(
+              { N },
+              { (ssize_t)sizeof(double) },
+              self.raw_x.data(),
+              py::cast(&self)
+            );
+          });
 
     // Dense version with all constraints and options
 m.def("solve",
@@ -564,8 +563,11 @@ m.def("solve",
        const MatrixXd& A, const VectorXd& lbA, const VectorXd& ubA,
        const py::dict& options_dict) {
         QPOptions options = dict_to_options(options_dict);
-        QPSolution sol = solve_qp_dense(H, g, lb, ub, E, b, A, lbA, ubA, options);
-        return sol;
+        {
+            py::gil_scoped_release release;
+            QPSolution sol = solve_qp_dense(H, g, lb, ub, E, b, A, lbA, ubA, options);
+            return sol;
+        }
     },
     py::arg("H"), py::arg("g"),
     py::arg("lb") = VectorXd(), py::arg("ub") = VectorXd(),
@@ -583,8 +585,11 @@ m.def("solve",
            const SpMat& A, const VectorXd& lbA, const VectorXd& ubA,
            const py::dict& options_dict) {
             QPOptions options = dict_to_options(options_dict);
-            QPSolution sol = solve_qp_sparse(H, g, lb, ub, E, b, A, lbA, ubA, options);
-            return sol;
+            {
+                py::gil_scoped_release release;
+                QPSolution sol = solve_qp_sparse(H, g, lb, ub, E, b, A, lbA, ubA, options);
+                return sol;
+            }
         },
         py::arg("H"), py::arg("g"),
         py::arg("lb") = VectorXd(), py::arg("ub") = VectorXd(),
@@ -600,23 +605,28 @@ m.def("solve",
            const SpMat& E, const VectorXd& b,
            const SpMat& A, const VectorXd& lbA, const VectorXd& ubA,
            const py::dict& options_dict) {
-            qp_int n = H.size();
-            SpMat H_diag(n, n);
-
-             // Create triplet list for diagonal elements
-            std::vector<Eigen::Triplet<double>> triplets;
-            triplets.reserve(n);
-
-            for (int i = 0; i < n; i++) {
-                triplets.push_back(Eigen::Triplet<double>(i, i, H(i)));
-            }
-
-            H_diag.setFromTriplets(triplets.begin(), triplets.end());
-            H_diag.makeCompressed();
-
             QPOptions options = dict_to_options(options_dict);
-            QPSolution sol = solve_qp_sparse(H_diag, g, lb, ub, E, b, A, lbA, ubA, options);
-            return sol;
+            {
+                py::gil_scoped_release release;
+
+                qp_int n = H.size();
+                SpMat H_diag(n, n);
+
+                 // Create triplet list for diagonal elements
+                std::vector<Eigen::Triplet<double>> triplets;
+                triplets.reserve(n);
+
+                for (int i = 0; i < n; i++) {
+                    triplets.push_back(Eigen::Triplet<double>(i, i, H(i)));
+                }
+
+                H_diag.setFromTriplets(triplets.begin(), triplets.end());
+                H_diag.makeCompressed();
+
+
+                QPSolution sol = solve_qp_sparse(H_diag, g, lb, ub, E, b, A, lbA, ubA, options);
+                return sol;
+            }
         },
         py::arg("H"), py::arg("g"),
         py::arg("lb") = VectorXd(), py::arg("ub") = VectorXd(),
