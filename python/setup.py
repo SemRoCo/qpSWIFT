@@ -90,7 +90,7 @@ c_sources = [
 ]
 
 # Add the pybind11 wrapper
-wrapper_cpp = os.path.join(here, 'pyqp_swift.cpp')
+wrapper_cpp = os.path.join(here, 'pyqpSWIFT.cpp')
 c_sources.append(wrapper_cpp)
 
 # Setup include directories
@@ -121,7 +121,7 @@ ext_modules = [
 setup(
     name="qpSWIFT",
     version="0.1.0",
-    description="Python bindings for the QP_SWIFT solver (inline C build)",
+    description="Python bindings for the QP_SWIFT solver",
     ext_modules=ext_modules,
     install_requires=["numpy", "scipy", "pybind11"],
     zip_safe=False,

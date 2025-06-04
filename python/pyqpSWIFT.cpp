@@ -7,13 +7,81 @@
 #include <Eigen/Sparse>
 #include <vector>
 #include <cmath>
+#include <thread>
+#include <stdexcept>
 #include <iostream>
+#include <queue>
+#include <mutex>
+#include <future>
+#include <condition_variable>
+#include <functional>
 #include "qpSWIFT.h"
 #include "GlobalOptions.h" // Include GlobalOptions for the MAXIT, RELTOL, etc. macros
 
 namespace py = pybind11;
 using namespace Eigen;
 using SpMat = Eigen::SparseMatrix<qp_real, Eigen::ColMajor, qp_int>;
+
+
+class ThreadPool {
+public:
+    ThreadPool(size_t threads)
+        :   stop(false)
+    {
+        for (size_t i = 0; i < threads; ++i)
+            workers.emplace_back([this] {
+                for (;;) {
+                    std::function<void()> task;
+                    {
+                        std::unique_lock<std::mutex> lock(this->queue_mutex);
+                        this->condition.wait(lock,
+                            [this]{ return this->stop || !this->tasks.empty(); });
+                        if (this->stop && this->tasks.empty())
+                            return;
+                        task = std::move(this->tasks.front());
+                        this->tasks.pop();
+                    }
+                    task();
+                }
+            });
+    }
+
+    // enqueue a job, get a future for its return value
+    template<class F, class... Args>
+    auto enqueue(F&& f, Args&&... args)
+        -> std::future<typename std::result_of<F(Args...)>::type>
+    {
+        using Ret = typename std::result_of<F(Args...)>::type;
+        auto task = std::make_shared<std::packaged_task<Ret()>>(
+            std::bind(std::forward<F>(f), std::forward<Args>(args)...)
+        );
+        std::future<Ret> res = task->get_future();
+        {
+            std::unique_lock<std::mutex> lock(queue_mutex);
+            if (stop) throw std::runtime_error("enqueue on stopped ThreadPool");
+            tasks.emplace([task](){ (*task)(); });
+        }
+        condition.notify_one();
+        return res;
+    }
+
+    ~ThreadPool() {
+        {
+            std::unique_lock<std::mutex> lock(queue_mutex);
+            stop = true;
+        }
+        condition.notify_all();
+        for (std::thread &worker : workers)
+            worker.join();
+    }
+
+private:
+    std::vector<std::thread>        workers;
+    std::queue<std::function<void()>> tasks;
+    std::mutex                      queue_mutex;
+    std::condition_variable         condition;
+    bool                            stop;
+};
 
 // Structure to hold solution data
 struct __attribute__((visibility("hidden"))) QPSolution {
@@ -427,14 +495,9 @@ QPSolution solve_qp_sparse(
     // Create the G matrix and h vector
     int m = constraint_idx;  // Total number of inequality constraints
     SpMat G(m, n);
-    VectorXd h(m);
 
     G.setFromTriplets(G_triplets.begin(), G_triplets.end());
     G.makeCompressed();
-
-    for (int i = 0; i < m; i++) {
-        h[i] = h_values[i];
-    }
 
     // Process equality constraints
     qp_int p = 0;
@@ -471,7 +534,7 @@ QPSolution solve_qp_sparse(
         E_effective.outerIndexPtr(), E_effective.innerIndexPtr(), E_effective.valuePtr(),
         G.outerIndexPtr(), G.innerIndexPtr(), G.valuePtr(),
         g_copy.data(),
-        h.data(),
+        h_values.data(),
         b_effective.data(),
         0.0,
         NULL  // No permutation
@@ -535,6 +598,8 @@ QPOptions dict_to_options(const py::dict& options_dict) {
     return options;
 }
 
+static ThreadPool pool(std::max<unsigned>(1u, std::thread::hardware_concurrency() - 1));
+
 // Python module
 PYBIND11_MODULE(qpSWIFT, m) {
     m.doc() = "Python bindings for qpSWIFT quadratic programming solver";
@@ -556,26 +621,26 @@ PYBIND11_MODULE(qpSWIFT, m) {
           });
 
     // Dense version with all constraints and options
-m.def("solve",
-    [](const MatrixXd& H, const VectorXd& g,
-       const VectorXd& lb, const VectorXd& ub,
-       const MatrixXd& E, const VectorXd& b,
-       const MatrixXd& A, const VectorXd& lbA, const VectorXd& ubA,
-       const py::dict& options_dict) {
-        QPOptions options = dict_to_options(options_dict);
-        {
-            py::gil_scoped_release release;
-            QPSolution sol = solve_qp_dense(H, g, lb, ub, E, b, A, lbA, ubA, options);
-            return sol;
-        }
-    },
-    py::arg("H"), py::arg("g"),
-    py::arg("lb") = VectorXd(), py::arg("ub") = VectorXd(),
-    py::arg("E") = MatrixXd(0, 0), py::arg("b") = VectorXd(),
-    py::arg("A") = MatrixXd(0, 0), py::arg("lbA") = VectorXd(), py::arg("ubA") = VectorXd(),
-    py::arg("options") = py::dict(),
-    "Solve a QP with dense matrices"
-);
+    m.def("solve",
+        [](const MatrixXd& H, const VectorXd& g,
+           const VectorXd& lb, const VectorXd& ub,
+           const MatrixXd& E, const VectorXd& b,
+           const MatrixXd& A, const VectorXd& lbA, const VectorXd& ubA,
+           const py::dict& options_dict) {
+            QPOptions options = dict_to_options(options_dict);
+            {
+                py::gil_scoped_release release;
+                QPSolution sol = solve_qp_dense(H, g, lb, ub, E, b, A, lbA, ubA, options);
+                return sol;
+            }
+        },
+        py::arg("H"), py::arg("g"),
+        py::arg("lb") = VectorXd(), py::arg("ub") = VectorXd(),
+        py::arg("E") = MatrixXd(0, 0), py::arg("b") = VectorXd(),
+        py::arg("A") = MatrixXd(0, 0), py::arg("lbA") = VectorXd(), py::arg("ubA") = VectorXd(),
+        py::arg("options") = py::dict(),
+        "Solve a QP with dense matrices"
+    );
 
     // Sparse version with all constraints and options
     m.def("solve_sparse",
@@ -636,38 +701,77 @@ m.def("solve",
         "Solve a QP with a diagonal Hessian matrix (provided as a vector of diagonal elements)"
     );
 
-
-    // Backwards compatibility with the old interface
-    m.def("run",
-        [](const VectorXd& c, const VectorXd& h, const MatrixXd& P, const MatrixXd& G,
-           const MatrixXd& A, const VectorXd& b,
-           const py::dict& options_dict) {
-            // Convert options dict to QPOptions
+    m.def("solve_sparse_H_diag_batch",
+        [](const std::vector<py::tuple>& qp_data,
+           const py::dict& options_dict)
+        {
+            // parse options once
             QPOptions options = dict_to_options(options_dict);
-            QPSolution sol = solve_qp_dense(P, c, VectorXd(), VectorXd(), A, b, G, VectorXd(), h, options);
-            return sol;
-        },
-        py::arg("c"), py::arg("h"), py::arg("P"), py::arg("G"),
-        py::arg("A") = MatrixXd(0, 0), py::arg("b") = VectorXd(),
-        py::arg("options") = py::dict(),
-        "Legacy interface: min 0.5*x'Px + c'x s.t. Gx <= h, Ax = b"
-    );
 
-    m.def("run_sparse",
-        [](const VectorXd& c, const VectorXd& h,
-           const SpMat& P,
-           const SpMat& G,
-           const SpMat& A,
-           const VectorXd& b,
-           const py::dict& options_dict) {
-            // Convert options dict to QPOptions
-            QPOptions options = dict_to_options(options_dict);
-            QPSolution sol = solve_qp_sparse(P, c, VectorXd(), VectorXd(), A, b, G, VectorXd(), h, options);
-            return sol;
-        },
-        py::arg("c"), py::arg("h"), py::arg("P"), py::arg("G"),
-        py::arg("A") = SpMat(), py::arg("b") = VectorXd(),
+            size_t N = qp_data.size();
+            // POD for each QP
+            struct QP {
+                    VectorXd H, g, lb, ub, b, lbA, ubA;
+                    SpMat E, A;
+                };
+            std::vector<QP> data;
+            data.reserve(N);
+            // unpack under GIL
+            for (auto &t : qp_data) {
+                    if (t.size() != 9)
+                    throw std::invalid_argument("Each tuple needs 9 elements");
+                data.push_back(QP{
+                        t[0].cast<VectorXd>(),
+                        t[1].cast<VectorXd>(),
+                        t[2].cast<VectorXd>(),
+                        t[3].cast<VectorXd>(),
+                        t[5].cast<VectorXd>(),
+                        t[7].cast<VectorXd>(),
+                        t[8].cast<VectorXd>(),
+                        t[4].cast<SpMat>(),
+                        t[6].cast<SpMat>()
+                    });
+            }
+
+            std::vector<QPSolution> solutions(N);
+            std::vector<std::future<void>> futures;
+            futures.reserve(N);
+
+            {
+                py::gil_scoped_release release;
+                // enqueue one job per QP
+                for (size_t i = 0; i < N; ++i) {
+                    futures.emplace_back(pool.enqueue([&,i] {
+                            const auto& q = data[i];
+                            // build diagonal H
+                            qp_int n = q.H.size();
+                            SpMat Hdiag(n, n);
+                            std::vector<Eigen::Triplet<double>> T;
+                            T.reserve(n);
+                            for (qp_int k = 0; k < n; ++k)
+                                T.emplace_back(k,k,q.H(k));
+                            Hdiag.setFromTriplets(T.begin(), T.end());
+                            Hdiag.makeCompressed();
+
+                            solutions[i] = solve_qp_sparse(
+                                Hdiag, q.g,
+                                q.lb, q.ub,
+                                q.E,  q.b,
+                                q.A,
+                                q.lbA, q.ubA,
+                                options
+                            );
+                        })
+                    );
+                    }
+                for (auto &f : futures) f.get();
+            }
+
+            return solutions;
+            },
+        py::arg("qp_data"),
         py::arg("options") = py::dict(),
-        "Legacy interface (sparse): min 0.5*x'Px + c'x s.t. Gx <= h, Ax = b"
+        "Solve a batch of diagonal‐H QPs in parallel from a list of 9‐tuples "
+        "(H, g, lb, ub, E, b, A, lbA, ubA) with a shared options dict."
     );
 }
