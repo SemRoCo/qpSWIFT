@@ -664,6 +664,164 @@ PYBIND11_MODULE(qpSWIFT, m) {
         "Solve a QP with sparse matrices"
     );
 
+
+    m.def("run_sparse",
+        [](const VectorXd& P, const VectorXd& c,
+           const VectorXd& h, const SpMat& G,
+           const VectorXd& b, const SpMat& A,
+           const py::dict& opts) {
+            QPOptions options = dict_to_options(opts);
+            QPSolution sol;
+            {
+                py::gil_scoped_release release;
+
+                qp_int n = P.size();
+                SpMat H_diag(n, n);
+
+                 // Create triplet list for diagonal elements
+                std::vector<Eigen::Triplet<double>> triplets;
+                triplets.reserve(n);
+
+                for (int i = 0; i < n; i++) {
+                    triplets.push_back(Eigen::Triplet<double>(i, i, P(i)));
+                }
+
+                H_diag.setFromTriplets(triplets.begin(), triplets.end());
+                H_diag.makeCompressed();
+
+                sol = solve_qp_sparse(H_diag,
+                                                 c,
+                                                 VectorXd::Constant(P.size(), -INFINITY),
+                                                 VectorXd::Constant(P.size(), INFINITY),
+                                                 A, b,
+                                                 G, VectorXd::Constant(h.size(), -INFINITY),
+                                                 h, options);
+
+            }
+            // Convert to Python dict format
+            py::dict result;
+            py::dict basic_info;
+            basic_info["ExitFlag"] = sol.exit_flag;
+            result["basicInfo"] = basic_info;
+
+            py::array_t<double> x_array = py::cast(sol.raw_x);
+            result["sol"] = x_array;
+
+
+            return result;
+        },
+        py::arg("P"), py::arg("c"),
+        py::arg("h") = VectorXd(), py::arg("G") = SpMat(),
+        py::arg("b") = VectorXd(), py::arg("A") = SpMat(),
+        py::arg("opts") = py::dict(),
+        "Solve a QP with sparse matrices with old interface"
+    );
+
+    // Sparse version with all constraints and options
+    m.def("run_sparse_with_box_constraints",
+        [](const VectorXd& P, const VectorXd& c, const VectorXd& h_box, const VectorXd& h,
+           const SpMat& G_box, const SpMat& G,
+           const VectorXd& b, const SpMat& A,
+           const py::dict& opts) {
+            QPOptions options = dict_to_options(opts);
+            QPSolution sol;
+            {
+                py::gil_scoped_release release;
+
+                qp_int n = P.size();
+                SpMat H_diag(n, n);
+
+                 // Create triplet list for diagonal elements
+                std::vector<Eigen::Triplet<double>> triplets;
+                triplets.reserve(n);
+
+                for (int i = 0; i < n; i++) {
+                    triplets.push_back(Eigen::Triplet<double>(i, i, P(i)));
+                }
+
+                H_diag.setFromTriplets(triplets.begin(), triplets.end());
+                H_diag.makeCompressed();
+
+                // Stack G_box and G vertically
+                SpMat G_combined;
+                if (G_box.rows() > 0 && G.rows() > 0) {
+                    // Both matrices have data - stack them vertically
+                    G_combined.resize(G_box.rows() + G.rows(), n);
+                    std::vector<Eigen::Triplet<double>> combined_triplets;
+
+                    // Add G_box triplets
+                    for (int k = 0; k < G_box.outerSize(); ++k) {
+                        for (SpMat::InnerIterator it(G_box, k); it; ++it) {
+                            combined_triplets.push_back(Eigen::Triplet<double>(it.row(), it.col(), it.value()));
+                        }
+                    }
+
+                    // Add G triplets with row offset
+                    for (int k = 0; k < G.outerSize(); ++k) {
+                        for (SpMat::InnerIterator it(G, k); it; ++it) {
+                            combined_triplets.push_back(Eigen::Triplet<double>(it.row() + G_box.rows(), it.col(), it.value()));
+                        }
+                    }
+
+                    G_combined.setFromTriplets(combined_triplets.begin(), combined_triplets.end());
+                    G_combined.makeCompressed();
+                } else if (G_box.rows() > 0) {
+                    // Only G_box has data
+                    G_combined = G_box;
+                } else if (G.rows() > 0) {
+                    // Only G has data
+                    G_combined = G;
+                } else {
+                    // Neither has data - create empty matrix
+                    G_combined.resize(0, n);
+                }
+
+                // Combine h_box and h vectors
+                VectorXd h_combined;
+                if (h_box.size() > 0 && h.size() > 0) {
+                    // Both vectors have data - concatenate them
+                    h_combined.resize(h_box.size() + h.size());
+                    h_combined.head(h_box.size()) = h_box;
+                    h_combined.tail(h.size()) = h;
+                } else if (h_box.size() > 0) {
+                    // Only h_box has data
+                    h_combined = h_box;
+                } else if (h.size() > 0) {
+                    // Only h has data
+                    h_combined = h;
+                } else {
+                    // Neither has data - create empty vector
+                    h_combined.resize(0);
+                }
+
+                sol = solve_qp_sparse(H_diag,
+                                                 c,
+                                                 VectorXd::Constant(P.size(), -INFINITY),
+                                                 VectorXd::Constant(P.size(), INFINITY),
+                                                 A, b,
+                                                 G_combined, VectorXd::Constant(h_combined.size(), -INFINITY),
+                                                 h_combined, options);
+
+            }
+            // Convert to Python dict format
+            py::dict result;
+            py::dict basic_info;
+            basic_info["ExitFlag"] = sol.exit_flag;
+            result["basicInfo"] = basic_info;
+
+            py::array_t<double> x_array = py::cast(sol.raw_x);
+            result["sol"] = x_array;
+
+
+            return result;
+        },
+        py::arg("P"), py::arg("c"), py::arg("h_box") = VectorXd(), py::arg("h") = VectorXd(),
+        py::arg("G_box") = SpMat(), py::arg("G") = SpMat(),
+        py::arg("b") = VectorXd(), py::arg("A") = SpMat(),
+        py::arg("opts") = py::dict(),
+        "Solve a QP with sparse matrices with old interface"
+    );
+
     m.def("solve_sparse_H_diag",
         [](const VectorXd& H, const VectorXd& g,
            const VectorXd& lb, const VectorXd& ub,

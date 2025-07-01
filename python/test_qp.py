@@ -40,6 +40,7 @@ def solve_and_verify_qp_solution(H, g, lb, ub, E, b, A, lbA, ubA, benchmark: boo
         else:
             x = qpSWIFT.solve_sparse(sparse_H, g, lb, ub, sparse_E, b, sparse_A, lbA, ubA, options).x
     print(f'Time(sparse): {(time.time() - t)/iterations}')
+    print(f'Solution: {x}')
 
     if len(sparse_H.shape) == 1:
         x_batch = qpSWIFT.solve_sparse_H_diag_batch(qp_data=[(sparse_H, g, lb, ub, sparse_E, b, sparse_A, lbA, ubA)], options=options)[0].x
@@ -122,6 +123,23 @@ def test_solve_eq_as_ineq():
 
     lb = np.array([-np.inf, -np.inf])
     ub = np.array([np.inf, np.inf])
+
+    solve_and_verify_qp_solution(H, g, lb, ub, E, b, A, lbA, ubA)
+
+
+def test_solve_non_convex_constraints():
+    H = np.eye(3)
+    g = np.array([0.0, 0.0, 0.0])
+
+    E = np.array([[1, -1, -1]])
+    b = np.array([0])
+
+    A = np.array([[1, 1, 0]])
+    lbA = np.array([0.5])
+    ubA = np.array([np.inf])
+
+    lb = np.array([0, 0, -np.inf])
+    ub = np.array([np.inf, np.inf, np.inf])
 
     solve_and_verify_qp_solution(H, g, lb, ub, E, b, A, lbA, ubA)
 
