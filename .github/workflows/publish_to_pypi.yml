@@ -30,7 +30,7 @@ jobs:
             echo "Current directory: $(pwd)"
             echo "Files in project root: $(ls -la)"
             echo "Python directory exists: $(ls -la python/)"
-            apt-get install libeigen3-dev cmake
+            apt-get install libeigen3 libeigen3-dev cmake
             pip install -r requirements.txt
             cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
             cmake --build build --config Release
