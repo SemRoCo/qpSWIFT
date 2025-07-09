@@ -601,8 +601,8 @@ QPOptions dict_to_options(const py::dict& options_dict) {
 static ThreadPool pool(std::max<unsigned>(1u, std::thread::hardware_concurrency() - 1));
 
 // Python module
-PYBIND11_MODULE(qpSWIFT, m) {
-    m.doc() = "Python bindings for qpSWIFT quadratic programming solver";
+PYBIND11_MODULE(qpSWIFT_sparse_bindings, m) {
+    m.doc() = "Custom sparse python bindings for the qpSWIFT solver";
 
     py::class_<QPSolution>(m, "QPSolution")
         .def_readonly("exit_flag", &QPSolution::exit_flag, "Exit flag (0: success, >0: error)")
