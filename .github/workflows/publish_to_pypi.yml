@@ -27,6 +27,9 @@ jobs:
           CIBW_BUILD: cp${{ matrix.python-version == '3.10' && '310' || matrix.python-version == '3.11' && '311' || matrix.python-version == '3.12' && '312' || matrix.python-version == '3.9' && '39' || '38' }}-manylinux_x86_64
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
           CIBW_BEFORE_BUILD: |
+            echo "Current directory: $(pwd)"
+            echo "Files in project root: $(ls -la)"
+            echo "Python directory exists: $(ls -la python/)"
             apt install -y eigen3-devel cmake3 || (apt-get update && apt-get install -y libeigen3-dev cmake)
             pip install -r requirements.txt
             cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
