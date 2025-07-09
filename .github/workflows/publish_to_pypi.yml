@@ -24,18 +24,16 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install setuptools build wheel numpy auditwheel patchelf pybind11 scipy cibuildwheel
 
-      - name: Build package
-        run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --config Release
-          cd python
-          python3 -m build --wheel -n
-
       - name: Build wheels
         env:
           CIBW_BUILD: cp${{ matrix.python-version == '3.10' && '310' || matrix.python-version == '3.11' && '311' || matrix.python-version == '3.12' && '312' || matrix.python-version == '3.9' && '39' || '38' }}-manylinux_x86_64
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
-          CIBW_BEFORE_BUILD: pip install -r requirements.txt
+          CIBW_BEFORE_BUILD: |
+            yum install -y eigen3-devel cmake3 || (apt-get update && apt-get install -y libeigen3-dev cmake)
+            pip install -r requirements.txt
+            cd /project && rm -rf build/ python/build/ python/dist/ python/*.so python/*.c
+            cd /project && cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+            cd /project && cmake --build build --config Release
           CIBW_REPAIR_WHEEL_COMMAND: auditwheel repair -w {dest_dir} {wheel}
         run: |
           cd python
