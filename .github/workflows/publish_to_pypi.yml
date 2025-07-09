@@ -21,6 +21,8 @@ jobs:
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install setuptools build wheel numpy auditwheel patchelf pybind11 scipy
+          apt update
+          apt install libeigen3-dev
 
       - name: Build package
         run: |
