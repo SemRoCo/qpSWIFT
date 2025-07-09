@@ -35,7 +35,7 @@ jobs:
         run: |
           mkdir -p dist
           cd python
-          auditwheel repair dist/*.whl --plat manylinux_2_34_x86_64
+          auditwheel repair dist/*.whl --plat manylinux2014_x86_64
           rm dist/*.whl
           mv wheelhouse/*.whl ../dist/
 
