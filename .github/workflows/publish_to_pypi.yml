@@ -28,7 +28,7 @@ jobs:
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
           CIBW_BEFORE_BUILD: |
             yum install -y eigen3-devel cmake3
-            pip install -r requirements.txt
+            pip install -r python/requirements.txt
             cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
             cmake --build build --config Release
           CIBW_REPAIR_WHEEL_COMMAND: auditwheel repair -w {dest_dir} {wheel}
