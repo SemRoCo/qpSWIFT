@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
-          python3 -m pip install setuptools build wheel numpy auditwheel patchelf
+          python3 -m pip install setuptools build wheel numpy auditwheel patchelf pybind11
 
       - name: Build package
         run: |
