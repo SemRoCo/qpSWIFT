@@ -29,9 +29,8 @@ jobs:
           CIBW_BEFORE_BUILD: |
             apt install -y eigen3-devel cmake3 || (apt-get update && apt-get install -y libeigen3-dev cmake)
             pip install -r requirements.txt
-            cd /project && rm -rf build/ python/build/ python/dist/ python/*.so python/*.c
-            cd /project && cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-            cd /project && cmake --build build --config Release
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+            cmake --build build --config Release
           CIBW_REPAIR_WHEEL_COMMAND: auditwheel repair -w {dest_dir} {wheel}
         run: |
           cd python
