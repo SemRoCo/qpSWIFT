@@ -119,7 +119,7 @@ ext_modules = [
 
 setup(
     name="qpSWIFT_sparse_bindings",
-    version="1.0.1",
+    version="1.0.2",
     description="Custom sparse python bindings for the qpSWIFT solver",
     long_description_content_type="text/markdown",
     python_requires='>=3.8, <3.13',
