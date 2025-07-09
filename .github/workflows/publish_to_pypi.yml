@@ -35,11 +35,11 @@ jobs:
         run: |
           python -m cibuildwheel python --output-dir wheelhouse
 
-      - name: Store the distribution packages
+      - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: python-package-distributions-${{ matrix.python-version }}
-          path: dist/
+          name: wheels-${{ matrix.python-version }}
+          path: ./wheelhouse/*.whl
 
   publish-to-pypi:
     name: Publish Python 🐍 distribution 📦 to PyPI
