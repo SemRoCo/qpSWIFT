@@ -97,7 +97,6 @@ c_sources.append(wrapper_cpp)
 include_dirs = [
     include_dir,
     pybind11.get_include(),
-    pybind11.get_include(user=True),
     np.get_include(),
 ]
 
@@ -110,7 +109,7 @@ extra_compile_args = ["-O3", "-std=c++11"]
 
 ext_modules = [
     Extension(
-        name="qpSWIFT",
+        name="qpSWIFT_sparse_bindings",
         sources=c_sources,
         include_dirs=include_dirs,
         language="c++",
@@ -119,10 +118,33 @@ ext_modules = [
 ]
 
 setup(
-    name="qpSWIFT",
-    version="0.1.0",
-    description="Python bindings for the QP_SWIFT solver",
+    name="qpSWIFT_sparse_bindings",
+    version="1.0.0",
+    description="Custom sparse python bindings for the qpSWIFT solver",
+    long_description_content_type="text/markdown",
+    python_requires='>=3.8, <3.13',
+    long_description='qpSWIFT is light-weight sparse Quadratic Programming solver targeted for embedded and robotic applications. '
+                     'It employs Primal-Dual Interioir Point method with Mehrotra Predictor corrector step and Nesterov Todd scaling. '
+                     'For solving the linear system of equations, sparse LDL\' factorization is used along with approximate minimum '
+                     'degree heuristic to minimize fill-in of the factorizations.\n '
+                     'This is a fork of the official qpSWIFT project (https://github.com/qpSWIFT/qpSWIFT) adapted for use with Giskard(py)',
     ext_modules=ext_modules,
+    url="https://github.com/SemRoCo/qpSWIFT",
+    author="Simon Stelter",
     install_requires=["numpy", "scipy", "pybind11"],
+    license='GPLv3',
+    license_files=('LICENSE',),
+    classifiers=[
+        'Development Status :: 5 - Production/Stable',
+        'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
+        'Operating System :: POSIX :: Linux',
+        'Intended Audience :: Science/Research',
+        "Programming Language :: Python",
+        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
+    ],
     zip_safe=False,
 )

@@ -1,6 +1,6 @@
 import numpy as np
 import scipy.sparse as sp
-import qpSWIFT
+import qpSWIFT_sparse_bindings as qpSWIFT
 
 # Solver Options
 # For information about Solver options please refer to qpSWIFT documentation
