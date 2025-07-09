@@ -57,12 +57,8 @@ jobs:
       - name: Download all the dists
         uses: actions/download-artifact@v4
         with:
-          pattern: python-package-distributions-*
+          pattern: wheels-*
           path: dist/
           merge-multiple: true
       - name: Publish distribution 📦 to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-#        with:
-#          repository-url: https://test.pypi.org/legacy/  # remove/comment line when publishing to actual repository
-#        user: __token__                                # used before setting up a trusted publisher
-#        password: ${{ secrets.PYPI_API_TOKEN }}
