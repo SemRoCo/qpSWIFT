@@ -530,7 +530,14 @@ qp_int QP_SOLVE(QP *myQP)
 
 			/* Updates lambda and mu */
 			formlambda(myQP->lambda, myQP->s, myQP->z, myQP->m);
-			myQP->mu = innerproduct(myQP->lambda, myQP->lambda, myQP->m) / myQP->m;
+			if (myQP->m == 0)
+			{
+				myQP->mu = 0.0;
+			}
+			else
+			{
+				myQP->mu = innerproduct(myQP->lambda, myQP->lambda, myQP->m) / myQP->m;
+			}
 
 			if (myQP->options->sigma > myQP->sigma_d)
 			{

@@ -781,8 +781,14 @@ void computeresiduals(QP *myQP)
 		
 
 	myQP->stats->n_rz = norm(myQP->rz, myQP->m);
-
-	myQP->stats->n_mu = innerproduct(myQP->s, myQP->z, myQP->m) / myQP->m;
+	if (myQP->m == 0)
+	{
+		myQP->stats->n_mu = 0.0;
+	}
+	else
+	{
+		myQP->stats->n_mu = innerproduct(myQP->s, myQP->z, myQP->m) / myQP->m;
+	}
 }
 
 /*!
