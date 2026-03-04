@@ -68,6 +68,7 @@ QP *QP_SETUP(qp_int n, qp_int m, qp_int p, qp_int *Pjc, qp_int *Pir, qp_real *Pp
 	myQP->options->maxit = MAXIT;
 	myQP->options->sigma = SIGMA;
 	myQP->options->verbose = VERBOSE;
+	myQP->options->check_infeasibility = 1;
 	/* Initialise Settings */
 
 	/* Initialise Stats */
@@ -269,6 +270,7 @@ QP *QP_SETUP_dense(qp_int n, qp_int m, qp_int p, qp_real *Ppr, qp_real *Apr, qp_
 	myQP->options->maxit = MAXIT;
 	myQP->options->sigma = SIGMA;
 	myQP->options->verbose = VERBOSE;
+	myQP->options->check_infeasibility = 1;
 	/* Initialise Settings */
 
 	/* Initialise Stats */
@@ -507,7 +509,12 @@ qp_int QP_SOLVE(QP *myQP)
 
 			if (myQP->options->verbose > 0)
 			{
-				PRINT("It: %ld || pcost : %e || rx:%e   ||  ry:%e ||  rz:%e || mu:%e\n", myQP->stats->IterationCount, myQP->stats->fval, myQP->stats->n_rx, myQP->stats->n_ry, myQP->stats->n_rz, myQP->stats->n_mu);
+				PRINT("================================================================\n");
+				PRINT("It: %ld || pcost :                            %e\n", myQP->stats->IterationCount, myQP->stats->fval);
+				PRINT("      || dual residual (rx):                  %e\n", myQP->stats->n_rx);
+				PRINT("      || equality constraint residual (ry):   %e\n", myQP->stats->n_ry);
+				PRINT("      || inequality constraint residual (rz): %e\n", myQP->stats->n_rz);
+				PRINT("      || barrier parameter (mu):              %e\n", myQP->stats->n_mu);
 			}
 
 			/* Checks Exit condition if rx < ABSTOL rz < FEASTOl and s'z/m < 1e-6 */
@@ -606,6 +613,13 @@ qp_int QP_SOLVE(QP *myQP)
 		if (myQP->stats->IterationCount == myQP->options->maxit)
 		{
 			myQP->stats->Flag = QP_MAXIT;
+			if (myQP->options->check_infeasibility)
+			{
+				if (myQP->stats->n_rx > myQP->options->reltol || myQP->stats->n_rz > myQP->options->reltol || (myQP->p && myQP->stats->n_ry > myQP->options->reltol))
+				{
+					myQP->stats->Flag = QP_INFEASIBLE;
+				}
+			}
 		}
 	}
 

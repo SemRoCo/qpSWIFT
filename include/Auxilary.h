@@ -96,6 +96,7 @@ typedef struct settings
 	qp_int verbose; /*!< Verbose Levels || 0 :: No Print
 					 *                  || 1 :: Print Residuals and Step Sizes
                      * 					|| 2 :: Print Everything */
+	qp_int check_infeasibility; /*!< Check for Infeasibility if set to 1 */
 
 } settings;
 

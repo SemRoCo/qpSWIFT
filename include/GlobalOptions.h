@@ -55,6 +55,7 @@ extern "C"
 #define QP_KKTFAIL (1) /*!< Failure in solving LDL' factorization */
 #define QP_MAXIT (2)   /*!< Maximum Number of Iterations Exceeded */
 #define QP_FATAL (3)   /*!< Unknown Problem in Solver */
+#define QP_INFEASIBLE (4) /*!< Infeasible Solution Found */
 
 #define ROW_MAJOR_ORDERING (20) /*!< Row Major Ordering of the input Matrices; Used in QP_SETUP_dense */
 #define COLUMN_MAJOR_ORDERING (30) /*!< Column Major Ordering of the input Matrices; Used in QP_SETUP_dense */

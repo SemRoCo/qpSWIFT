@@ -92,6 +92,10 @@ struct __attribute__((visibility("hidden"))) QPSolution {
     double setup_time;
     double solve_time;
     double obj_value;
+    double rx;
+    double ry;
+    double rz;
+    double mu;
 };
 
 
@@ -102,6 +106,7 @@ struct QPOptions {
     qp_real reltol;
     qp_real sigma;
     qp_int verbose;
+    qp_int check_infeasibility;
     
     // Constructor with default values from GlobalOptions.h
     QPOptions() : 
@@ -109,7 +114,8 @@ struct QPOptions {
         abstol(ABSTOL),
         reltol(RELTOL),
         sigma(SIGMA),
-        verbose(VERBOSE) {}
+        verbose(VERBOSE),
+        check_infeasibility(0) {}
 };
 
 // Utility functions
@@ -204,6 +210,7 @@ void apply_options(QP* myQP, const QPOptions& options) {
         myQP->options->reltol = options.reltol;
         myQP->options->sigma = options.sigma;
         myQP->options->verbose = options.verbose;
+        myQP->options->check_infeasibility = options.check_infeasibility;
         if (options.verbose){
             std::cout << "\n****qpSWIFT : Sparse Quadratic Programming Solver****\n\n" << std::endl;
             std::cout << "================Settings Applied======================\n" << std::endl;
@@ -516,15 +523,6 @@ QPSolution solve_qp_sparse(
         b_effective.resize(0);
     }
 
-    // Print problem details
-//    std::cout << "Setting up QP problem (sparse)...==================================" << std::endl;
-//    std::cout << "Hessian matrix H:\n" << H << std::endl;
-//    std::cout << "Gradient vector g:\n" << g.transpose() << std::endl;
-//    std::cout << "Equality matrix E:\n" << E_effective << std::endl;
-//    std::cout << "Equality bounds b:\n" << b_effective.transpose() << std::endl;
-//    std::cout << "Inequality matrix G:\n" << G << std::endl;
-//    std::cout << "Inequality bounds h:\n" << h.transpose() << std::endl;
-
     // Create mutable copy of gradient
     VectorXd g_copy = g;
 
@@ -564,6 +562,10 @@ QPSolution solve_qp_sparse(
     solution.setup_time = myQP->stats->tsetup;
     solution.solve_time = myQP->stats->tsolve;
     solution.obj_value = myQP->stats->fval;
+    solution.rx = myQP->stats->n_rx;
+    solution.ry = myQP->stats->n_ry;
+    solution.rz = myQP->stats->n_rz;
+    solution.mu = myQP->stats->n_mu;
 
     // Clean up
     QP_CLEANUP(myQP);
@@ -595,6 +597,10 @@ QPOptions dict_to_options(const py::dict& options_dict) {
         options.verbose = options_dict["VERBOSE"].cast<qp_int>();
     else options.verbose = VERBOSE;
     
+    if (options_dict.contains("CheckInfeasibility"))
+        options.check_infeasibility = options_dict["CheckInfeasibility"].cast<qp_int>();
+    else options.check_infeasibility = 0;
+    
     return options;
 }
 
@@ -610,6 +616,10 @@ PYBIND11_MODULE(qpSWIFT_sparse_bindings, m) {
         .def_readonly("setup_time", &QPSolution::setup_time, "Setup time in seconds")
         .def_readonly("solve_time", &QPSolution::solve_time, "Solve time in seconds")
         .def_readonly("obj_value", &QPSolution::obj_value, "Objective function value")
+        .def_readonly("rx", &QPSolution::rx, "dual residual")
+        .def_readonly("ry", &QPSolution::ry, "equality constraint residuals")
+        .def_readonly("rz", &QPSolution::rz, "inequality constraint residuals")
+        .def_readonly("mu", &QPSolution::mu, "barrier parameter")
         .def_property_readonly("x", [](QPSolution &self) {
             ssize_t N = self.raw_x.size();
             return py::array_t<double>(
