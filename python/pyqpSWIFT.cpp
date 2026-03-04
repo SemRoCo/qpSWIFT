@@ -628,7 +628,20 @@ PYBIND11_MODULE(qpSWIFT_sparse_bindings, m) {
               self.raw_x.data(),
               py::cast(&self)
             );
-          });
+          })
+        .def("__str__", [](const QPSolution &self) {
+            std::string s = "QPSolution:\n";
+            s += "  exit_flag:  " + std::to_string(self.exit_flag) + "\n";
+            s += "  iterations: " + std::to_string(self.iterations) + "\n";
+            s += "  obj_value:  " + std::to_string(self.obj_value) + "\n";
+            s += "  setup_time: " + std::to_string(self.setup_time) + " s\n";
+            s += "  solve_time: " + std::to_string(self.solve_time) + " s\n";
+            s += "  dual residual (rx): " + std::to_string(self.rx) + " s\n";
+            s += "  equality constraint residuals (ry): " + std::to_string(self.ry) + " s\n";
+            s += "  inequality constraint residuals (rz): " + std::to_string(self.rz) + " s\n";
+            s += "  barrier parameter (mu): " + std::to_string(self.mu) + " s";
+            return s;
+        });
 
     // Dense version with all constraints and options
     m.def("solve",
